@@ -4206,4 +4206,6 @@ typedef enum {
     // - none
     VB_EMPTY_BOTTLE_OI,
 
+    VB_KEEP_WORLD_RUNNING_WHILE_PAUSED,
+
 } GIVanillaBehavior;

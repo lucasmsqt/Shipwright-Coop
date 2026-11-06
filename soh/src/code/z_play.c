@@ -651,9 +651,16 @@ void Play_Init(GameState* thisx) {
 #endif
 }
 
+s32 Play_IsLivePause(PlayState* play) {
+    return play->pauseCtx.state != 0 && play->pauseCtx.debugState == 0 &&
+           play->gameOverCtx.state == GAMEOVER_INACTIVE && gSaveContext.gameMode == GAMEMODE_NORMAL &&
+           GameInteractor_Should(VB_KEEP_WORLD_RUNNING_WHILE_PAUSED, false);
+}
+
 void Play_Update(PlayState* play) {
     Input* input = play->state.input;
-    s32 isPaused;
+    s32 isPaused = false;
+    s32 livePause = false;
     s32 pad1;
 
     if ((SREG(1) < 0) || (DREG(0) != 0)) {
@@ -1111,6 +1118,7 @@ void Play_Update(PlayState* play) {
 
             PLAY_LOG(3551);
             isPaused = (play->pauseCtx.state != 0) || (play->pauseCtx.debugState != 0);
+            livePause = Play_IsLivePause(play);
 
             PLAY_LOG(3555);
             AnimationContext_Reset(&play->animationCtx);
@@ -1120,7 +1128,13 @@ void Play_Update(PlayState* play) {
 
             PLAY_LOG(3577);
 
-            if (!isPaused && (IREG(72) == 0)) {
+            if ((!isPaused || livePause) && (IREG(72) == 0)) {
+                Input menuInput;
+                if (livePause) {
+                    menuInput = input[0];
+                    memset(&input[0], 0, sizeof(input[0]));
+                }
+
                 PLAY_LOG(3580);
 
                 play->gameplayFrames++;
@@ -1183,6 +1197,9 @@ void Play_Update(PlayState* play) {
 
                     PLAY_LOG(3662);
                 }
+                if (livePause) {
+                    input[0] = menuInput;
+                }
             } else {
                 func_800AA178(false);
             }
@@ -1221,6 +1238,16 @@ void Play_Update(PlayState* play) {
 
             PLAY_LOG(3716);
 
+            if (livePause && (play->gameOverCtx.state != GAMEOVER_INACTIVE || play->csCtx.state != CS_STATE_IDLE)) {
+                if (play->pauseCtx.state >= 4) {
+                    play->pauseCtx.state = 0x13; // Run the normal pause-menu cleanup before Game Over.
+                } else {
+                    play->pauseCtx.state = 0;
+                    R_PAUSE_MENU_MODE = 0;
+                    R_UPDATE_RATE = 3;
+                    func_800F64E0(0);
+                }
+            }
             if ((play->pauseCtx.state != 0) || (play->pauseCtx.debugState != 0)) {
                 PLAY_LOG(3721);
                 KaleidoScopeCall_Update(play);
@@ -1260,7 +1287,7 @@ skip:
 
     GameInteractor_ExecuteOnCameraState(play);
 
-    if (!isPaused || gDbgCamEnabled) {
+    if (!isPaused || livePause || gDbgCamEnabled) {
         s32 i;
 
         play->nextCamera = play->activeCamera;
@@ -1312,11 +1339,16 @@ void Play_Draw(PlayState* play) {
     static bool lastAltAssets;
     static bool hasCapturedPauseBuffer;
     bool recapturePauseBuffer = false;
+    const bool livePause = Play_IsLivePause(play);
 
     // If the size has changed, alt assets toggled, or dropped frames leading to the buffer not being copied,
     // set the prerender state back to setup to copy a new frame.
     // This requires not rendering kaleido during this copy to avoid kaleido itself being copied too.
-    if ((R_PAUSE_MENU_MODE == 2 || R_PAUSE_MENU_MODE == 3) &&
+    if (livePause && (R_PAUSE_MENU_MODE == 1 || R_PAUSE_MENU_MODE == 2)) {
+        R_PAUSE_MENU_MODE = 3;
+        hasCapturedPauseBuffer = false;
+    }
+    if (!livePause && (R_PAUSE_MENU_MODE == 2 || R_PAUSE_MENU_MODE == 3) &&
         (lastPauseWidth != OTRGetGameRenderWidth() || lastPauseHeight != OTRGetGameRenderHeight() ||
          lastAltAssets != ResourceMgr_IsAltAssetsEnabled() || !hasCapturedPauseBuffer)) {
         R_PAUSE_MENU_MODE = 1;
@@ -1359,7 +1391,7 @@ void Play_Draw(PlayState* play) {
 
         // Flip the projections and invert culling for the OPA and XLU display buffers
         // These manage the world and effects when we are not drawing kaleido
-        if (R_PAUSE_MENU_MODE <= 1 && CVarGetInteger(CVAR_ENHANCEMENT("MirroredWorld"), 0)) {
+        if ((livePause || R_PAUSE_MENU_MODE <= 1) && CVarGetInteger(CVAR_ENHANCEMENT("MirroredWorld"), 0)) {
             gSPSetExtraGeometryMode(POLY_OPA_DISP++, G_EX_INVERT_CULLING);
             gSPSetExtraGeometryMode(POLY_XLU_DISP++, G_EX_INVERT_CULLING);
             gSPMatrix(POLY_OPA_DISP++, play->view.projectionFlippedPtr, G_MTX_NOPUSH | G_MTX_LOAD | G_MTX_PROJECTION);
@@ -1441,7 +1473,7 @@ void Play_Draw(PlayState* play) {
             R_PAUSE_MENU_MODE = 0;
         }
 
-        if (R_PAUSE_MENU_MODE == 3) {
+        if (!livePause && R_PAUSE_MENU_MODE == 3) {
             Gfx* gfxP = POLY_OPA_DISP;
 
             // SOH [Port] Draw game framebuffer using our custom handling

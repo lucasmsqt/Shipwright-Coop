@@ -100,6 +100,8 @@ void Anchor::RegisterHooks() {
 
     COND_HOOK(OnGameFrameUpdate, isConnected, [&]() { ProcessIncomingPacketQueue(); });
 
+    COND_VB_SHOULD(VB_KEEP_WORLD_RUNNING_WHILE_PAUSED, isConnected, { *should = Anchor::Instance->IsSaveLoaded(); });
+
     COND_HOOK(OnPlayerSfx, isConnected, [&](u16 sfxId) { SendPacket_PlayerSfx(sfxId); });
     COND_HOOK(OnOcarinaNote, isConnected,
               [&](uint8_t note, float modulator, int8_t bend) { SendPacket_OcarinaSfx(note, modulator, bend); });

@@ -129,7 +129,9 @@ void KaleidoScopeCall_Draw(PlayState* play) {
     if (R_PAUSE_MENU_MODE >= 3) {
         if (((play->pauseCtx.state >= 4) && (play->pauseCtx.state <= 7)) ||
             ((play->pauseCtx.state >= 11) && (play->pauseCtx.state <= 18))) {
-            if (gKaleidoMgrCurOvl == kaleidoScopeOvl) {
+            // Link can change the active overlay while the live world is drawn. On the port,
+            // the pause draw function is still available at its native address.
+            if (gKaleidoMgrCurOvl == kaleidoScopeOvl || Play_IsLivePause(play)) {
                 sKaleidoScopeDrawFunc(play);
             }
         }

@@ -755,8 +755,13 @@ s32 Camera_CopyPREGToModeValues(Camera* camera) {
 #define SHRINKWIN_CURVAL (0x8000)
 #define IFACE_ALPHA_MASK (0x0F00)
 
-void Camera_UpdateInterface(s16 flags) {
+void Camera_UpdateInterface(PlayState* play, s16 flags) {
     s16 interfaceAlpha;
+
+    // The pause menu controls the HUD and waits for the letterbox to close before opening.
+    if (Play_IsLivePause(play)) {
+        return;
+    }
 
     if ((flags & SHRINKWIN_MASK) != SHRINKWIN_MASK) {
         switch (flags & SHRINKWINVAL_MASK) {
@@ -5272,7 +5277,7 @@ s32 Camera_Unique9(Camera* camera) {
                 if ((anim->curKeyFrame->unk_01 & 0xF0) == 0x80) {
                     D_8011D3AC = anim->curKeyFrame->unk_01 & 0xF;
                 } else if ((anim->curKeyFrame->unk_01 & 0xF0) == 0xC0) {
-                    Camera_UpdateInterface(0xF000 | ((anim->curKeyFrame->unk_01 & 0xF) << 8));
+                    Camera_UpdateInterface(camera->play, 0xF000 | ((anim->curKeyFrame->unk_01 & 0xF) << 8));
                 } else if (camera->player->stateFlags1 & PLAYER_STATE1_IN_WATER &&
                            player->currentBoots != PLAYER_BOOTS_IRON) {
                     Player_SetCsAction(camera->play, camera->target, 8);
@@ -7633,19 +7638,19 @@ Vec3s Camera_Update(Camera* camera) {
     if (camera->status == CAM_STAT_ACTIVE) {
         if ((gSaveContext.gameMode != GAMEMODE_NORMAL) && (gSaveContext.gameMode != GAMEMODE_END_CREDITS)) {
             sCameraInterfaceFlags = 0;
-            Camera_UpdateInterface(sCameraInterfaceFlags);
+            Camera_UpdateInterface(camera->play, sCameraInterfaceFlags);
         } else if ((D_8011D3F0 != 0) && (camera->thisIdx == CAM_ID_MAIN)) {
             D_8011D3F0--;
             sCameraInterfaceFlags = 0x3200;
-            Camera_UpdateInterface(sCameraInterfaceFlags);
+            Camera_UpdateInterface(camera->play, sCameraInterfaceFlags);
         } else if (camera->play->transitionMode != TRANS_MODE_OFF) {
             sCameraInterfaceFlags = 0xF200;
-            Camera_UpdateInterface(sCameraInterfaceFlags);
+            Camera_UpdateInterface(camera->play, sCameraInterfaceFlags);
         } else if (camera->play->csCtx.state != CS_STATE_IDLE) {
             sCameraInterfaceFlags = 0x3200;
-            Camera_UpdateInterface(sCameraInterfaceFlags);
+            Camera_UpdateInterface(camera->play, sCameraInterfaceFlags);
         } else {
-            Camera_UpdateInterface(sCameraInterfaceFlags);
+            Camera_UpdateInterface(camera->play, sCameraInterfaceFlags);
         }
     }
 

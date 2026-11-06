@@ -1547,6 +1547,7 @@ u8 CheckMedallionCount();
 u8 CheckDungeonCount();
 u8 CheckBridgeRewardCount();
 s32 Play_InCsMode(PlayState* play);
+s32 Play_IsLivePause(PlayState* play);
 f32 func_800BFCB8(PlayState* play, MtxF* mf, Vec3f* vec);
 void* Play_LoadFile(PlayState* play, RomFile* file);
 void Play_SpawnScene(PlayState* play, s32 sceneId, s32 spawn);

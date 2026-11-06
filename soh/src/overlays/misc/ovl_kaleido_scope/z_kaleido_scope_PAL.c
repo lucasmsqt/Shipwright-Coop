@@ -3590,6 +3590,7 @@ void func_808265BC(PlayState* play) {
 }
 
 void KaleidoScope_UpdateCursorSize(PauseContext* pauseCtx) {
+    // Cursor vertices belong to the current draw frame and must only be used while drawing.
     s32 temp1;
     s32 temp2;
     s32 temp3;
@@ -3856,10 +3857,7 @@ void KaleidoScope_Update(PlayState* play) {
         if ((!pauseCtx->unk_1E4 || (pauseCtx->unk_1E4 == 8)) && (pauseCtx->state == 6)) {
             pauseCtx->stickRelX = input->rel.stick_x;
             pauseCtx->stickRelY = input->rel.stick_y;
-            KaleidoScope_UpdateCursorSize(&play->pauseCtx);
             KaleidoScope_HandlePageToggles(pauseCtx, input);
-        } else if ((pauseCtx->pageIndex == PAUSE_QUEST) && ((pauseCtx->unk_1E4 < 3) || (pauseCtx->unk_1E4 == 5))) {
-            KaleidoScope_UpdateCursorSize(&play->pauseCtx);
         }
 
         if (pauseCtx->state == 6) {
