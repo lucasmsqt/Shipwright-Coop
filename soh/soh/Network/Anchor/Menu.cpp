@@ -144,6 +144,21 @@ void AnchorMainMenu(WidgetInfo& info) {
 
     ImGui::Spacing();
 
+    UIWidgets::CVarCheckbox("Follow Team Cutscenes", CVAR_REMOTE_ANCHOR("FollowTeamCutscenes"),
+                            UIWidgets::CheckboxOptions().Color(THEME_COLOR).Tooltip(
+                                "Share the Deku Tree introduction, Saria's bridge scene and Zelda fleeing the castle. "
+                                "The player who starts the scene controls dialogue for the team in vanilla saves."));
+    UIWidgets::CVarCheckbox("Share Enemy Damage", CVAR_REMOTE_ANCHOR("ShareEnemyDamage"),
+                            UIWidgets::CheckboxOptions().Color(THEME_COLOR).Tooltip(
+                                "Share damage to Deku Babas, Gold Skulltulas and Queen Gohma with teammates in the same room "
+                                "who enable this."));
+    UIWidgets::CVarCheckbox("Sync NPC Positions", CVAR_REMOTE_ANCHOR("SyncNpcPositions"),
+                            UIWidgets::CheckboxOptions().Color(THEME_COLOR).Tooltip(
+                                "Follow the first teammate to enter the area. The room owner wins ties."));
+    UIWidgets::CVarCheckbox("Sync Hyrule Field Time", CVAR_REMOTE_ANCHOR("SyncHyruleFieldTime"),
+                            UIWidgets::CheckboxOptions().Color(THEME_COLOR).Tooltip(
+                                "Use the room owner's clock in Hyrule Field when both players enable this."));
+
     bool hideLocations = Anchor::Instance->roomState.showLocationsMode == 0;
     ImGui::BeginDisabled(hideLocations);
     UIWidgets::CVarCheckbox(

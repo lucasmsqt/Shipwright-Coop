@@ -12,6 +12,7 @@
 #include "objects/object_shopnuts/object_shopnuts.h"
 #include "objects/object_dns/object_dns.h"
 #include "objects/object_dnk/object_dnk.h"
+#include "soh/Network/Anchor/ScrubShot.h"
 
 #define FLAGS ACTOR_FLAG_UPDATE_CULLING_DISABLED
 
@@ -68,6 +69,54 @@ static Gfx* sDLists[] = {
     gDekuNutsDekuNutDL, gHintNutsNutDL, gBusinessScrubDekuNutDL, gDntJijiNutDL, gDntStageNutDL,
 };
 
+Actor* EnNutsball_SpawnFromScrub(PlayState* play, Actor* scrub, Vec3f* pos, s16 type) {
+    if (!Anchor_ShouldSpawnScrubShot(scrub)) {
+        return NULL;
+    }
+    Actor* shot = Actor_Spawn(&play->actorCtx, play, ACTOR_EN_NUTSBALL, pos->x, pos->y, pos->z, scrub->shape.rot.x,
+                              scrub->shape.rot.y, scrub->shape.rot.z, type);
+    if (shot != NULL) {
+        Anchor_SendScrubShotSpawn(shot);
+    }
+    return shot;
+}
+
+void EnNutsball_MarkShared(EnNutsball* shot, u32 owner, u32 serial, bool replica) {
+    shot->sharedOwner = owner;
+    shot->sharedSerial = serial;
+    shot->sharedReplica = replica;
+    shot->collider.base.ocFlags1 &= ~OC1_ON;
+}
+
+void EnNutsball_Reflect(EnNutsball* shot, Vec3f* pos, s16 yaw) {
+    shot->collider.base.atFlags &= ~(AT_TYPE_ENEMY | AT_BOUNCED | AT_HIT);
+    shot->collider.base.atFlags |= AT_TYPE_PLAYER;
+    if (shot->sharedOwner != 0) {
+        shot->collider.base.acFlags &= ~AC_HIT;
+        shot->collider.base.ocFlags1 &= ~OC1_HIT;
+    }
+    shot->collider.info.toucher.dmgFlags = 2;
+    shot->actor.world.pos = *pos;
+    shot->actor.world.rot.y = yaw;
+    shot->timer = 30;
+    shot->sharedHitFrame = 0;
+    shot->sharedReflected = true;
+}
+
+s32 EnNutsball_AllowPlayerContact(EnNutsball* shot, PlayState* play) {
+    if (shot->sharedOwner == 0) {
+        return true;
+    }
+    if (shot->sharedReplica) {
+        return false;
+    }
+    if (shot->sharedHitFrame == 0) {
+        // Hold the shot briefly so a teammate's shield can deflect it before body damage.
+        shot->sharedHitFrame = play->gameplayFrames + 9;
+    }
+    return play->gameplayFrames >= shot->sharedHitFrame;
+}
+
 void EnNutsball_Init(Actor* thisx, PlayState* play) {
     EnNutsball* this = (EnNutsball*)thisx;
     s32 pad;
@@ -75,6 +124,12 @@ void EnNutsball_Init(Actor* thisx, PlayState* play) {
     ActorShape_Init(&this->actor.shape, 400.0f, ActorShadow_DrawCircle, 13.0f);
     Collider_InitCylinder(play, &this->collider);
     Collider_SetCylinder(play, &this->collider, &this->actor, &sCylinderInit);
+    if (this->sharedOwner != 0) {
+        this->collider.base.ocFlags1 &= ~OC1_ON;
+        if (this->sharedReflected) {
+            EnNutsball_Reflect(this, &this->actor.world.pos, this->actor.world.rot.y);
+        }
+    }
     if (CVarGetInteger(CVAR_ENHANCEMENT("RandomizedEnemies"), 0)) {
         this->objBankIndex = 0;
     } else {
@@ -127,13 +182,10 @@ void func_80ABBBA8(EnNutsball* this, PlayState* play) {
             ((player->currentShield == PLAYER_SHIELD_HYLIAN) && LINK_IS_ADULT)) {
             if ((this->collider.base.atFlags & AT_HIT) && (this->collider.base.atFlags & AT_TYPE_ENEMY) &&
                 (this->collider.base.atFlags & AT_BOUNCED)) {
-                this->collider.base.atFlags &= ~AT_TYPE_ENEMY & ~AT_BOUNCED & ~AT_HIT;
-                this->collider.base.atFlags |= AT_TYPE_PLAYER;
-
-                this->collider.info.toucher.dmgFlags = 2;
                 Matrix_MtxFToYXZRotS(&player->shieldMf, &sp4C, 0);
-                this->actor.world.rot.y = sp4C.y + 0x8000;
-                this->timer = 30;
+                EnNutsball_Reflect(this, &this->actor.world.pos, sp4C.y + 0x8000);
+                this->sharedReflectedLocally = true;
+                Anchor_SendScrubShotReflect(&this->actor);
                 return;
             }
         }
@@ -144,6 +196,9 @@ void func_80ABBBA8(EnNutsball* this, PlayState* play) {
 
         EffectSsHahen_SpawnBurst(play, &sp40, 6.0f, 0, 7, 3, 15, HAHEN_OBJECT_DEFAULT, 10, NULL);
         SoundSource_PlaySfxAtFixedWorldPos(play, &this->actor.world.pos, 20, NA_SE_EN_OCTAROCK_ROCK);
+        if (!this->sharedReplica && (this->collider.base.atFlags & AT_TYPE_ENEMY)) {
+            Anchor_SendScrubShotEnd(&this->actor);
+        }
         Actor_Kill(&this->actor);
     } else {
         if (this->timer == -300) {
@@ -162,14 +217,21 @@ void EnNutsball_Update(Actor* thisx, PlayState* play) {
         (this->actionFunc == func_80ABBB34)) {
         this->actionFunc(this, play);
 
-        Actor_MoveXZGravity(&this->actor);
+        if (this->sharedHitFrame != 0 && play->gameplayFrames > this->sharedHitFrame) {
+            this->sharedHitFrame = 0;
+        }
+        if (this->sharedHitFrame == 0) {
+            Actor_MoveXZGravity(&this->actor);
+        }
         Actor_UpdateBgCheckInfo(play, &this->actor, 10, sCylinderInit.dim.radius, sCylinderInit.dim.height, 5);
         Collider_UpdateCylinder(&this->actor, &this->collider);
 
         this->actor.flags |= ACTOR_FLAG_SFX_FOR_PLAYER_BODY_HIT;
 
         CollisionCheck_SetAT(play, &play->colChkCtx, &this->collider.base);
-        CollisionCheck_SetAC(play, &play->colChkCtx, &this->collider.base);
+        if (!this->sharedReplica || this->sharedReflected) {
+            CollisionCheck_SetAC(play, &play->colChkCtx, &this->collider.base);
+        }
         CollisionCheck_SetOC(play, &play->colChkCtx, &this->collider.base);
     }
 }

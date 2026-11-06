@@ -5,6 +5,8 @@
  */
 
 #include "z_bg_spot02_objects.h"
+
+s32 Anchor_WillPlayRoyalTombOpening(PlayState* play);
 #include "objects/object_spot02_objects/object_spot02_objects.h"
 #include "soh/Enhancements/game-interactor/GameInteractor_Hooks.h"
 
@@ -89,7 +91,7 @@ void BgSpot02Objects_Init(Actor* thisx, PlayState* play) {
 
             this->dyna.bgId = DynaPoly_SetBgActor(play, &play->colCtx.dyna, thisx, colHeader);
 
-            if (((Flags_GetEventChkInf(EVENTCHKINF_DESTROYED_ROYAL_FAMILY_TOMB)) &&
+            if (((Flags_GetEventChkInf(EVENTCHKINF_DESTROYED_ROYAL_FAMILY_TOMB)) && !Anchor_WillPlayRoyalTombOpening(play) &&
                  (play->sceneNum == SCENE_GRAVEYARD) && (thisx->params == 2)) ||
                 (LINK_IS_ADULT && (thisx->params == 1))) {
                 Actor_Kill(thisx);
@@ -102,7 +104,7 @@ void BgSpot02Objects_Init(Actor* thisx, PlayState* play) {
             this->actionFunc = func_808ACC34;
             thisx->draw = func_808ACCB8;
 
-            if (Flags_GetEventChkInf(EVENTCHKINF_DESTROYED_ROYAL_FAMILY_TOMB)) {
+            if (Flags_GetEventChkInf(EVENTCHKINF_DESTROYED_ROYAL_FAMILY_TOMB) && !Anchor_WillPlayRoyalTombOpening(play)) {
                 Actor_Kill(thisx);
             }
             break;

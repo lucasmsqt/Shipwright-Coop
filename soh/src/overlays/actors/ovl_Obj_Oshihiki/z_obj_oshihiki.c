@@ -8,6 +8,7 @@
 #include "overlays/actors/ovl_Obj_Switch/z_obj_switch.h"
 #include "objects/gameplay_dangeon_keep/gameplay_dangeon_keep.h"
 #include "soh/ResourceManagerHelpers.h"
+#include "soh/Network/Anchor/RoomObjects.h"
 
 #define FLAGS ACTOR_FLAG_UPDATE_CULLING_DISABLED
 
@@ -631,11 +632,52 @@ void ObjOshihiki_Fall(ObjOshihiki* this, PlayState* play) {
 void ObjOshihiki_Update(Actor* thisx, PlayState* play) {
     s32 pad;
     ObjOshihiki* this = (ObjOshihiki*)thisx;
+    s32 detail;
+    s32 sharedPhase = Anchor_ReadRoomObject(thisx, &this->sharedPosition, &detail, &this->sharedVersion);
+    bool wasPushing = this->actionFunc == ObjOshihiki_Push;
 
     this->stateFlags &=
         ~(PUSHBLOCK_SETUP_FALL | PUSHBLOCK_FALL | PUSHBLOCK_SETUP_PUSH | PUSHBLOCK_PUSH | PUSHBLOCK_SETUP_ON_ACTOR |
           PUSHBLOCK_ON_ACTOR | PUSHBLOCK_SETUP_ON_SCENE | PUSHBLOCK_ON_SCENE);
     this->stateFlags |= PUSHBLOCK_MOVE_UNDER;
+
+    if (sharedPhase != 0) {
+        if (this->sharedPhase == 0 && sharedPhase == ANCHOR_BLOCK_MOVING) {
+            this->stateFlags |= PUSHBLOCK_SETUP_PUSH;
+        }
+        this->sharedPhase = sharedPhase;
+        this->sharedUpdateFrame = play->gameplayFrames;
+        this->sentMovement = false;
+    }
+    if (this->sharedPhase != 0) {
+        Vec3f* position = &thisx->world.pos;
+        f32 distance = Math_Vec3f_DistXYZ(position, &this->sharedPosition);
+        if (distance > 25.0f || distance <= 4.0f) {
+            *position = this->sharedPosition;
+        } else {
+            f32 step = 4.0f / distance;
+            position->x += (this->sharedPosition.x - position->x) * step;
+            position->y += (this->sharedPosition.y - position->y) * step;
+            position->z += (this->sharedPosition.z - position->z) * step;
+        }
+        thisx->home.pos.x = position->x;
+        thisx->home.pos.z = position->z;
+        if (fabsf(this->dyna.unk_150) > 0.001f) {
+            GET_PLAYER(play)->stateFlags2 &= ~PLAYER_STATE2_MOVING_DYNAPOLY;
+            this->dyna.unk_150 = 0.0f;
+        }
+        this->pushDist = this->pushSpeed = 0.0f;
+        if (this->sharedPhase == ANCHOR_BLOCK_MOVING && play->gameplayFrames - this->sharedUpdateFrame < 20) {
+            this->stateFlags |= PUSHBLOCK_PUSH;
+            if (distance > 0.01f) {
+                Audio_PlayActorSound2(thisx, NA_SE_EV_ROCK_SLIDE - SFX_FLAG);
+            }
+        } else if (distance <= 4.0f || distance > 25.0f) {
+            this->sharedPhase = 0;
+            ObjOshihiki_SetupOnActor(this, play);
+        }
+        return;
+    }
 
     if (this->timer > 0) {
         this->timer--;
@@ -648,6 +690,16 @@ void ObjOshihiki_Update(Actor* thisx, PlayState* play) {
 
     if (this->actionFunc != NULL) {
         this->actionFunc(this, play);
+    }
+    if (this->actionFunc == ObjOshihiki_Push || (wasPushing && this->actionFunc == ObjOshihiki_Fall) ||
+        (this->sentMovement && this->actionFunc == ObjOshihiki_Fall)) {
+        if (!this->sentMovement || (play->gameplayFrames & 1) == 0) {
+            Anchor_SendRoomObject(thisx, ANCHOR_BLOCK_MOVING, 0);
+            this->sentMovement = true;
+        }
+    } else if (this->sentMovement) {
+        Anchor_SendRoomObject(thisx, ANCHOR_BLOCK_SETTLED, 0);
+        this->sentMovement = false;
     }
 }
 

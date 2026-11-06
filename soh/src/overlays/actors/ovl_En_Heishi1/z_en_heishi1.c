@@ -17,6 +17,7 @@ void EnHeishi1_Destroy(Actor* thisx, PlayState* play);
 void EnHeishi1_Update(Actor* thisx, PlayState* play);
 void EnHeishi1_Draw(Actor* thisx, PlayState* play);
 void EnHeishi1_Reset(void);
+s32 Anchor_ApplyGuardPose(Actor* actor, s16* headAngle);
 
 void EnHeishi1_SetupWait(EnHeishi1* this, PlayState* play);
 void EnHeishi1_SetupWalk(EnHeishi1* this, PlayState* play);
@@ -403,6 +404,16 @@ void EnHeishi1_WaitNight(EnHeishi1* this, PlayState* play) {
     }
 }
 
+s32 EnHeishi1_GetPatrolPhase(const EnHeishi1* this) {
+    if (this->actionFunc == EnHeishi1_Walk || this->actionFunc == EnHeishi1_SetupWalk) {
+        return 1;
+    }
+    if (this->actionFunc == EnHeishi1_Wait || this->actionFunc == EnHeishi1_SetupWait) {
+        return 0;
+    }
+    return -1;
+}
+
 void EnHeishi1_Update(Actor* thisx, PlayState* play) {
     EnHeishi1* this = (EnHeishi1*)thisx;
     s16 path;
@@ -427,8 +438,22 @@ void EnHeishi1_Update(Actor* thisx, PlayState* play) {
     activeCam = GET_ACTIVE_CAM(play);
 
     if (player->actor.freezeTimer == 0) {
-
-        this->actionFunc(this, play);
+        s16 headAngle;
+        s32 phase = EnHeishi1_GetPatrolPhase(this);
+        s32 sharedPhase = phase >= 0 ? Anchor_ApplyGuardPose(thisx, &headAngle) : -1;
+        if (sharedPhase >= 0) {
+            if (phase != sharedPhase || this->actionFunc == EnHeishi1_SetupWalk || this->actionFunc == EnHeishi1_SetupWait) {
+                if (sharedPhase == 1) {
+                    EnHeishi1_SetupWalk(this, play);
+                } else {
+                    EnHeishi1_SetupWait(this, play);
+                }
+            }
+            this->headAngle = headAngle;
+            SkelAnime_Update(&this->skelAnime);
+        } else {
+            this->actionFunc(this, play);
+        }
 
         this->actor.uncullZoneForward = 550.0f;
         this->actor.uncullZoneScale = 350.0f;

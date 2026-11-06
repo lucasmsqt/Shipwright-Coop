@@ -423,7 +423,9 @@ void func_80AFD7B4(EnSkb* this, PlayState* play) {
 
 void func_80AFD880(EnSkb* this, PlayState* play) {
     if (BodyBreak_SpawnParts(&this->actor, &this->bodyBreak, play, 1)) {
-        if (this->actor.scale.x == 0.01f) {
+        if (this->anchorReplica) {
+            // The client simulating the encounter owns its drops.
+        } else if (this->actor.scale.x == 0.01f) {
             Item_DropCollectibleRandom(play, &this->actor, &this->actor.world.pos, 0x10);
         } else if (this->actor.scale.x <= 0.015f) {
             Item_DropCollectible(play, &this->actor.world.pos, ITEM00_RUPEE_BLUE);
@@ -498,14 +500,70 @@ void func_80AFD968(EnSkb* this, PlayState* play) {
     }
 }
 
+s32 EnSkb_GetTeamPhase(const EnSkb* this) {
+    return this->actionFunc == func_80AFCFF0 ? 7 : this->actionState;
+}
+
+void EnSkb_ApplyTeamState(EnSkb* this, PlayState* play, s32 phase, s32 health, f32 offset, s32 attacking) {
+    if (this->anchorEnding) {
+        return;
+    }
+    if (phase != EnSkb_GetTeamPhase(this)) {
+        switch (phase) {
+            case 0: func_80AFCDF8(this); break;
+            case 1: func_80AFD7B4(this, play); break;
+            case 2: func_80AFD644(this); break;
+            case 3: func_80AFD33C(this); break;
+            case 4: func_80AFD0A4(this); break;
+            case 5: func_80AFD47C(this); break;
+            case 6: EnSkb_SetupStunned(this); break;
+            case 7: func_80AFCF48(this); break;
+        }
+    }
+    this->actor.colChkInfo.health = health;
+    this->actor.shape.yOffset = offset;
+    this->actor.shape.shadowScale = CLAMP(25.0f + offset * (25.0f / 8000.0f), 0.0f, 25.0f);
+    this->setColliderAT = attacking;
+    if (phase >= 2 && phase < 7) {
+        this->actor.flags |= ACTOR_FLAG_ATTENTION_ENABLED;
+    }
+}
+
+void EnSkb_EndTeamReplica(EnSkb* this, PlayState* play) {
+    if (!this->anchorEnding) {
+        this->anchorEnding = true;
+        this->anchorCleanupFrames = 30;
+        this->setColliderAT = 0;
+        if (IS_DAY) {
+            func_80AFCF48(this);
+        } else if (this->actionState != 1) {
+            this->actor.colChkInfo.health = 0;
+            func_80AFD7B4(this, play);
+        }
+    }
+}
+
 void EnSkb_Update(Actor* thisx, PlayState* play) {
     EnSkb* this = (EnSkb*)thisx;
     s32 pad;
 
-    func_80AFD968(this, play);
-    Actor_MoveXZGravity(&this->actor);
-    Actor_UpdateBgCheckInfo(play, &this->actor, 15.0f, 30.0f, 60.0f, 0x1D);
-    this->actionFunc(this, play);
+    if (this->anchorEnding && DECR(this->anchorCleanupFrames) == 0) {
+        Actor_Kill(thisx);
+        return;
+    }
+
+    if (!this->anchorReplica) {
+        func_80AFD968(this, play);
+    } else {
+        this->collider.base.acFlags &= ~AC_HIT;
+    }
+    if (!this->anchorReplica || this->anchorEnding || this->actionState == 1) {
+        Actor_MoveXZGravity(&this->actor);
+        Actor_UpdateBgCheckInfo(play, &this->actor, 15.0f, 30.0f, 60.0f, 0x1D);
+        this->actionFunc(this, play);
+    } else {
+        SkelAnime_Update(&this->skelAnime);
+    }
     this->actor.focus.pos = this->actor.world.pos;
     this->actor.focus.pos.y += (3000.0f * this->actor.scale.y);
     if (this->setColliderAT != 0) {

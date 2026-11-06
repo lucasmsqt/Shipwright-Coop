@@ -1,4 +1,5 @@
 #include "z_door_warp1.h"
+#include "soh/Network/Anchor/GohmaSync.h"
 #include "objects/object_warp1/object_warp1.h"
 #include "soh/Enhancements/randomizer/randomizer_entrance.h"
 #include "soh/Enhancements/game-interactor/GameInteractor_Hooks.h"
@@ -482,11 +483,23 @@ s32 DoorWarp1_PlayerInRange(DoorWarp1* this, PlayState* play) {
 
 void DoorWarp1_ChildWarpIdle(DoorWarp1* this, PlayState* play) {
     Player* player;
+    bool sharedGohma = Anchor_UseSharedGohmaPortal();
+    s32 request = sharedGohma ? Anchor_GetGohmaWarpRequest() : -1;
 
     Audio_PlayActorSound2(&this->actor, NA_SE_EV_WARP_HOLE - SFX_FLAG);
 
-    if (DoorWarp1_PlayerInRange(this, play)) {
+    if (request >= 0 || DoorWarp1_PlayerInRange(this, play)) {
         player = GET_PLAYER(play);
+        this->sharedGohmaStory = -1;
+        if (request >= 0) {
+            this->sharedGohmaStory = request;
+            player->actor.world.pos = this->actor.world.pos;
+            player->actor.velocity.y = 0.0f;
+            player->actor.speedXZ = 0.0f;
+        } else if (sharedGohma) {
+            this->sharedGohmaStory = !Flags_GetEventChkInf(EVENTCHKINF_OBTAINED_KOKIRI_EMERALD_DEKU_TREE_DEAD);
+            Anchor_StartGohmaWarp(this->sharedGohmaStory);
+        }
 
         Audio_PlaySfxGeneral(NA_SE_EV_LINK_WARP, &player->actor.projectedPos, 4, &gSfxDefaultFreqAndVolScale,
                              &gSfxDefaultFreqAndVolScale, &gSfxDefaultReverb);
@@ -535,9 +548,15 @@ void DoorWarp1_ChildWarpOut(DoorWarp1* this, PlayState* play) {
                 gSaveContext.nextCutsceneIndex = 0;
             }
         } else if (play->sceneNum == SCENE_DEKU_TREE_BOSS) {
-            if (GameInteractor_Should(VB_PLAY_BLUE_WARP_CS,
-                                      !Flags_GetEventChkInf(EVENTCHKINF_OBTAINED_KOKIRI_EMERALD_DEKU_TREE_DEAD),
-                                      EVENTCHKINF_OBTAINED_KOKIRI_EMERALD_DEKU_TREE_DEAD)) {
+            bool story = this->sharedGohmaStory >= 0 ? this->sharedGohmaStory :
+                         !Flags_GetEventChkInf(EVENTCHKINF_OBTAINED_KOKIRI_EMERALD_DEKU_TREE_DEAD);
+            bool playStory = GameInteractor_Should(VB_PLAY_BLUE_WARP_CS, story,
+                                                   EVENTCHKINF_OBTAINED_KOKIRI_EMERALD_DEKU_TREE_DEAD);
+            if (this->sharedGohmaStory >= 0) {
+                Anchor_CommitGohmaWarp();
+                playStory = story;
+            }
+            if (playStory) {
                 Flags_SetEventChkInf(EVENTCHKINF_OBTAINED_KOKIRI_EMERALD_DEKU_TREE_DEAD);
                 Flags_SetEventChkInf(EVENTCHKINF_USED_DEKU_TREE_BLUE_WARP);
                 if (GameInteractor_Should(VB_GIVE_ITEM_FROM_BLUE_WARP, true, ITEM_KOKIRI_EMERALD)) {

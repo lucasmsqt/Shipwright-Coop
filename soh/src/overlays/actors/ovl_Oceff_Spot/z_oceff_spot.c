@@ -5,6 +5,7 @@
  */
 
 #include "z_oceff_spot.h"
+#include "soh/Network/Anchor/RoomObjects.h"
 #include "vt.h"
 
 #define FLAGS (ACTOR_FLAG_UPDATE_CULLING_DISABLED | ACTOR_FLAG_UPDATE_DURING_OCARINA)
@@ -85,6 +86,7 @@ void OceffSpot_End(OceffSpot* this, PlayState* play) {
             if (play->msgCtx.ocarinaAction != OCARINA_ACTION_CHECK_NOWARP_DONE ||
                 play->msgCtx.ocarinaMode != OCARINA_MODE_08) {
                 gSaveContext.sunsSongState = SUNSSONG_START;
+                Anchor_StartSunStun(play);
                 osSyncPrintf(VT_FGCOL(YELLOW));
                 // "Sun's Song Flag"
                 osSyncPrintf("z_oceff_spot  太陽の歌フラグ\n");

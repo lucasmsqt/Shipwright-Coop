@@ -1,6 +1,8 @@
 #include "z_en_rd.h"
 #include "objects/object_rd/object_rd.h"
 #include "soh/Enhancements/game-interactor/GameInteractor_Hooks.h"
+#include "soh/Network/Anchor/RedeadSync.h"
+#include "soh/Network/Anchor/RoomObjects.h"
 #include <libultraship/bridge/consolevariablebridge.h>
 
 #define FLAGS                                                                                 \
@@ -123,6 +125,10 @@ static Vec3f D_80AE4958 = { 0.25f, 0.25f, 0.25f };
 
 void EnRd_SetupAction(EnRd* this, EnRdActionFunc actionFunc) {
     this->actionFunc = actionFunc;
+}
+
+static Player* EnRd_GetTarget(EnRd* this, PlayState* play) {
+    return this->anchorTarget != NULL ? this->anchorTarget : GET_PLAYER(play);
 }
 
 void EnRd_Init(Actor* thisx, PlayState* play) {
@@ -251,7 +257,7 @@ void EnRd_Idle(EnRd* this, PlayState* play) {
 
         this->isMourning = 0;
 
-        if (this->actor.xzDistToPlayer <= 150.0f && func_8002DDE4(play)) {
+        if (this->actor.xzDistToPlayer <= 150.0f && (this->anchorTarget != NULL || func_8002DDE4(play))) {
             // Add a height check to redeads/gibdos freeze when Enemy Randomizer is on.
             // Without the height check, redeads/gibdos can freeze the player from insane distances in
             // vertical rooms (like the first room in Deku Tree), making these rooms nearly unplayable.
@@ -320,7 +326,7 @@ void EnRd_WalkToPlayer(EnRd* this, PlayState* play) {
     Vec3f sp44 = D_80AE4918;
     Color_RGBA8 sp40 = D_80AE4924;
     Color_RGBA8 sp3C = D_80AE4928;
-    Player* player = GET_PLAYER(play);
+    Player* player = EnRd_GetTarget(this, play);
     s32 pad;
     s16 sp32 = this->actor.yawTowardsPlayer - this->actor.shape.rot.y - this->headYRotation - this->upperBodyYRotation;
 
@@ -341,7 +347,7 @@ void EnRd_WalkToPlayer(EnRd* this, PlayState* play) {
                PLAYER_STATE1_JUMPING | PLAYER_STATE1_FREEFALL | PLAYER_STATE1_CLIMBING_LADDER)) &&
             !(player->stateFlags2 & PLAYER_STATE2_GRABBED_BY_ENEMY)) {
             if (this->playerStunWaitTimer == 0) {
-                if (!(this->rdFlags & PLAYER_STATE2_GRABBED_BY_ENEMY) &&
+                if (this->anchorTarget == NULL && !(this->rdFlags & PLAYER_STATE2_GRABBED_BY_ENEMY) &&
                     GameInteractor_Should(VB_REDEAD_GIBDO_FREEZE_LINK, true, this)) {
                     player->actor.freezeTimer = 40;
                     Player_SetAutoLockOnActor(play, &this->actor);
@@ -360,7 +366,8 @@ void EnRd_WalkToPlayer(EnRd* this, PlayState* play) {
         this->grabWaitTimer--;
     }
 
-    if (!this->grabWaitTimer && (Actor_WorldDistXYZToActor(&this->actor, &player->actor) <= 45.0f) &&
+    if (this->anchorTarget == NULL && !this->grabWaitTimer &&
+        (Actor_WorldDistXYZToActor(&this->actor, &player->actor) <= 45.0f) &&
         Actor_IsFacingPlayer(&this->actor, 0x38E3)) {
         player->actor.freezeTimer = 0;
         if (play->grabPlayer(play, player)) {
@@ -390,7 +397,7 @@ void EnRd_SetupWalkToHome(EnRd* this, PlayState* play) {
 }
 
 void EnRd_WalkToHome(EnRd* this, PlayState* play) {
-    Player* player = GET_PLAYER(play);
+    Player* player = EnRd_GetTarget(this, play);
     s32 pad;
     s16 targetY = Actor_WorldYawTowardPoint(&this->actor, &this->actor.home.pos);
 
@@ -574,7 +581,8 @@ void EnRd_AttemptPlayerFreeze(EnRd* this, PlayState* play) {
         this->actor.yawTowardsPlayer - this->actor.shape.rot.y - this->headYRotation - this->upperBodyYRotation;
 
     if (ABS(temp_v0) < 0x2008) {
-        if (!(this->rdFlags & 0x80) && GameInteractor_Should(VB_REDEAD_GIBDO_FREEZE_LINK, true, this)) {
+        if (this->anchorTarget == NULL && !(this->rdFlags & 0x80) &&
+            GameInteractor_Should(VB_REDEAD_GIBDO_FREEZE_LINK, true, this)) {
             player->actor.freezeTimer = 60;
             Rumble_Request(this->actor.xzDistToPlayer, 0xFF, 0x14, 0x96);
             Player_SetAutoLockOnActor(play, &this->actor);
@@ -627,7 +635,7 @@ void EnRd_SetupDamaged(EnRd* this) {
 }
 
 void EnRd_Damaged(EnRd* this, PlayState* play) {
-    Player* player = GET_PLAYER(play);
+    Player* player = EnRd_GetTarget(this, play);
 
     if (this->actor.speedXZ < 0.0f) {
         this->actor.speedXZ += 0.15f;
@@ -695,15 +703,15 @@ void EnRd_Dead(EnRd* this, PlayState* play) {
     }
 }
 
-void EnRd_SetupStunned(EnRd* this) {
+static void EnRd_SetupStunned(EnRd* this, s16 sunFrames) {
     this->action = 1;
     this->actor.speedXZ = 0.0f;
     this->actor.world.rot.y = this->actor.shape.rot.y;
-    if (gSaveContext.sunsSongState != SUNSSONG_INACTIVE) {
+    if (sunFrames > 0) {
         this->stunnedBySunsSong = 1;
-        this->sunsSongStunTimer = 0x258;
+        this->sunsSongStunTimer = sunFrames;
         Audio_PlayActorSound2(&this->actor, NA_SE_EN_LIGHT_ARROW_HIT);
-        Actor_SetColorFilter(&this->actor, -0x8000, -0x7F38, 0, 0xFF);
+        Actor_SetColorFilter(&this->actor, -0x8000, -0x7F38, 0, CLAMP_MAX(sunFrames, 0xFF));
     } else if (this->damageReaction == 1) {
         Actor_SetColorFilter(&this->actor, 0, 0xC8, 0, 0x50);
     } else {
@@ -762,13 +770,52 @@ void EnRd_TurnTowardsPlayer(EnRd* this, PlayState* play) {
 void EnRd_UpdateDamage(EnRd* this, PlayState* play) {
     s32 pad;
     Player* player = GET_PLAYER(play);
+    s32 oldHealth = this->actor.colChkInfo.health;
 
-    if ((gSaveContext.sunsSongState != SUNSSONG_INACTIVE) && (this->actor.shape.rot.x == 0) &&
+    if (oldHealth > 0 && (this->actor.shape.rot.x == 0) &&
         (this->stunnedBySunsSong == 0) && (this->action != 9) && (this->action != 10) && (this->action != 1)) {
-        EnRd_SetupStunned(this);
-        return;
+        s32 frames = Anchor_ConsumeSunStun(&this->actor, &this->anchorSunPulse);
+        if (frames > 0 || gSaveContext.sunsSongState != SUNSSONG_INACTIVE) {
+            if (this->actionFunc == EnRd_Grab) {
+                player->stateFlags2 &= ~PLAYER_STATE2_GRABBED_BY_ENEMY;
+                this->actor.shape.yOffset = 0.0f;
+            }
+            this->anchorFollowing = false;
+            this->anchorHitGrace = 8;
+            EnRd_SetupStunned(this, frames > 0 ? frames : 600);
+            return;
+        }
     }
 
+    if (oldHealth > 0 && !(this->collider.base.acFlags & AC_HIT)) {
+        s32 reaction = GI_ENEMY_HIT_NORMAL;
+        s32 damage = GameInteractor_ConsumeSharedEnemyDamage(&this->actor, &reaction, NULL);
+        if (damage > 0 || reaction == GI_ENEMY_HIT_STUN) {
+            if (this->actionFunc == EnRd_Grab) {
+                player->stateFlags2 &= ~PLAYER_STATE2_GRABBED_BY_ENEMY;
+                this->actor.shape.yOffset = 0.0f;
+            }
+            this->actor.colChkInfo.health = CLAMP_MIN(oldHealth - damage, 0);
+            this->damageReaction = 0;
+            this->anchorFollowing = false;
+            this->anchorHitGrace = 8;
+            this->stunnedBySunsSong = this->sunsSongStunTimer = 0;
+            if (reaction == GI_ENEMY_HIT_STUN) {
+                this->damageReaction = 1;
+                EnRd_SetupStunned(this, 0);
+            } else if (this->actor.colChkInfo.health == 0) {
+                EnRd_UpdateMourningTarget(play, &this->actor, 1);
+                EnRd_SetupDead(this);
+            } else {
+                if (reaction == GI_ENEMY_HIT_FIRE) {
+                    this->fireTimer = 0x28;
+                }
+                Actor_SetColorFilter(&this->actor, 0x4000, 0xFF, 0, reaction == GI_ENEMY_HIT_FIRE ? 0x50 : 8);
+                EnRd_SetupDamaged(this);
+            }
+            return;
+        }
+    }
     if (this->collider.base.acFlags & AC_HIT) {
         this->collider.base.acFlags &= ~AC_HIT;
         this->damageReaction = this->actor.colChkInfo.damageEffect;
@@ -780,9 +827,13 @@ void EnRd_UpdateDamage(EnRd* this, PlayState* play) {
             }
 
             if ((this->damageReaction != 0) && (this->damageReaction != 6)) {
+                this->anchorFollowing = false;
+                this->anchorHitGrace = 8;
                 if (((this->damageReaction == 1) || (this->damageReaction == 13)) && (this->action != 1)) {
                     Actor_ApplyDamage(&this->actor);
-                    EnRd_SetupStunned(this);
+                    EnRd_SetupStunned(this, 0);
+                    GameInteractor_ExecuteOnEnemyDamage(&this->actor, oldHealth - this->actor.colChkInfo.health,
+                                                        GI_ENEMY_HIT_STUN);
                     return;
                 }
 
@@ -797,6 +848,8 @@ void EnRd_UpdateDamage(EnRd* this, PlayState* play) {
                 }
 
                 Actor_ApplyDamage(&this->actor);
+                GameInteractor_ExecuteOnEnemyDamage(&this->actor, oldHealth - this->actor.colChkInfo.health,
+                    this->damageReaction == 0xE ? GI_ENEMY_HIT_FIRE : GI_ENEMY_HIT_NORMAL);
                 if (this->actor.colChkInfo.health == 0) {
                     EnRd_UpdateMourningTarget(play, &this->actor, 1);
                     EnRd_SetupDead(this);
@@ -809,11 +862,90 @@ void EnRd_UpdateDamage(EnRd* this, PlayState* play) {
     }
 }
 
+static const void* sTeamAnimations[] = {
+    &gGibdoRedeadIdleAnim, &gGibdoRedeadSobbingAnim, &gGibdoRedeadWipingTearsAnim, &gGibdoRedeadWalkAnim,
+    &gGibdoRedeadGrabStartAnim, &gGibdoRedeadGrabAttackAnim, &gGibdoRedeadGrabEndAnim, &gGibdoRedeadLookBackAnim,
+    &gGibdoRedeadStandUpAnim, &gGibdoRedeadDamageAnim, &gGibdoRedeadDeathAnim,
+};
+
+void EnRd_GetTeamMotion(const EnRd* this, RedeadMotion* motion) {
+    s16 animation = 0;
+    for (s16 i = 0; i < ARRAY_COUNT(sTeamAnimations); ++i) {
+        if (this->skelAnime.animation == sTeamAnimations[i]) {
+            animation = i;
+            break;
+        }
+    }
+    *motion = (RedeadMotion){ this->skelAnime.curFrame, this->actor.shape.yOffset, this->headYRotation,
+                              this->upperBodyYRotation, this->sunsSongStunTimer, this->action, animation,
+                              this->actionFunc == EnRd_Grab };
+}
+
+static void EnRd_AnimateTeamPose(EnRd* this, PlayState* play, const RedeadMotion* motion) {
+    void* animation = (void*)sTeamAnimations[motion->animation];
+    if (this->skelAnime.animation != animation) {
+        Animation_PlayLoop(&this->skelAnime, animation);
+    }
+    this->skelAnime.playSpeed = 0.0f;
+    this->skelAnime.curFrame = CLAMP(motion->frame, 0.0f, this->skelAnime.animLength - 1.0f);
+    SkelAnime_Update(&this->skelAnime);
+    this->actor.shape.yOffset = motion->yOffset;
+    this->headYRotation = motion->headYaw;
+    this->upperBodyYRotation = motion->torsoYaw;
+    this->action = motion->action;
+    this->sunsSongStunTimer = motion->sunFrames;
+    this->stunnedBySunsSong = motion->sunFrames > 0;
+    if (motion->sunFrames > 0 && this->actor.colorFilterTimer < 3) {
+        Actor_SetColorFilter(&this->actor, -0x8000, 0xC8, 0, CLAMP_MAX(motion->sunFrames, 0xFF));
+    }
+    if (motion->action != 4 && motion->action != 7) {
+        return;
+    }
+    Player* player = GET_PLAYER(play);
+    s16 yaw = Actor_WorldYawTowardActor(&this->actor, &player->actor);
+    s16 headYaw = yaw - this->actor.shape.rot.y - this->headYRotation - this->upperBodyYRotation;
+    f32 distance = Actor_WorldDistXYZToActor(&this->actor, &player->actor);
+    if (distance <= 150.0f && ABS(headYaw) < 0x1554 && this->playerStunWaitTimer == 0 &&
+        !(this->rdFlags & 0x80) && !(player->stateFlags1 & (PLAYER_STATE1_DEAD | PLAYER_STATE1_FREEFALL)) &&
+        !(player->stateFlags2 & PLAYER_STATE2_GRABBED_BY_ENEMY) && !Player_InCsMode(play) &&
+        GameInteractor_Should(VB_REDEAD_GIBDO_FREEZE_LINK, true, this)) {
+        player->actor.freezeTimer = 40;
+        this->playerStunWaitTimer = 60;
+        Player_SetAutoLockOnActor(play, &this->actor);
+        Audio_PlayActorSound2(&this->actor, NA_SE_EN_REDEAD_AIM);
+    }
+    if (motion->action == 4 && distance <= 45.0f && ABS((s16)(yaw - this->actor.shape.rot.y)) < 0x38E3 &&
+        this->grabWaitTimer == 0 && !Player_InCsMode(play) && play->grabPlayer(play, player)) {
+        player->actor.freezeTimer = 0;
+        this->actor.flags &= ~ACTOR_FLAG_ATTENTION_ENABLED;
+        this->anchorFollowing = false;
+        EnRd_SetupGrab(this);
+    }
+}
+
+static void EnRd_ResumeAfterTeamPose(EnRd* this, PlayState* play) {
+    switch (this->action) {
+        case 1: EnRd_SetupStunned(this, this->sunsSongStunTimer); break;
+        case 2: EnRd_SetupWalkToHome(this, play); break;
+        case 3: EnRd_SetupWalkToParent(this); break;
+        case 4: EnRd_SetupWalkToPlayer(this, play); break;
+        case 5: EnRd_SetupStandUp(this); break;
+        case 6: EnRd_SetupCrouch(this); break;
+        case 7: EnRd_SetupAttemptPlayerFreeze(this); break;
+        case 9: EnRd_SetupDamaged(this); break;
+        case 11: EnRd_SetupRiseFromCoffin(this); break;
+        default: EnRd_SetupIdle(this); break;
+    }
+    this->anchorFollowing = false;
+}
+
 void EnRd_Update(Actor* thisx, PlayState* play) {
     s32 pad;
     EnRd* this = (EnRd*)thisx;
     Player* player = GET_PLAYER(play);
     s32 pad2;
+    RedeadMotion motion;
+    bool following;
 
     EnRd_UpdateDamage(this, play);
 
@@ -821,9 +953,28 @@ void EnRd_Update(Actor* thisx, PlayState* play) {
         gSaveContext.sunsSongState = SUNSSONG_INACTIVE;
     }
 
-    if (this->damageReaction != 6 && ((this->action != 11) || (this->damageReaction != 14))) {
-        if (this->playerStunWaitTimer != 0) {
-            this->playerStunWaitTimer--;
+    DECR(this->playerStunWaitTimer);
+    following = DECR(this->anchorHitGrace) == 0 && this->actionFunc != EnRd_Grab &&
+                Anchor_ApplyRedeadPose(thisx, &motion);
+    if (following) {
+        this->anchorFollowing = true;
+        DECR(this->grabWaitTimer);
+        EnRd_AnimateTeamPose(this, play, &motion);
+    } else if (this->damageReaction != 6 && ((this->action != 11) || (this->damageReaction != 14))) {
+        s16 localYaw = thisx->yawTowardsPlayer;
+        f32 localDistance = thisx->xzDistToPlayer;
+        f32 localHeight = thisx->yDistToPlayer;
+        if (this->anchorFollowing) {
+            EnRd_ResumeAfterTeamPose(this, play);
+        }
+        if (this->action != 8 && this->action != 10) {
+            this->anchorTarget = (Player*)Anchor_FindRedeadTarget(thisx);
+            if (this->anchorTarget != NULL) {
+                Actor* target = &this->anchorTarget->actor;
+                thisx->yawTowardsPlayer = Actor_WorldYawTowardActor(thisx, target);
+                thisx->xzDistToPlayer = Actor_WorldDistXZToActor(thisx, target);
+                thisx->yDistToPlayer = target->world.pos.y - thisx->world.pos.y;
+            }
         }
 
         this->actionFunc(this, play);
@@ -838,6 +989,10 @@ void EnRd_Update(Actor* thisx, PlayState* play) {
         if (this->action == 7) {
             EnRd_TurnTowardsPlayer(this, play);
         }
+        this->anchorTarget = NULL;
+        thisx->yawTowardsPlayer = localYaw;
+        thisx->xzDistToPlayer = localDistance;
+        thisx->yDistToPlayer = localHeight;
     }
 
     this->actor.focus.pos = this->actor.world.pos;

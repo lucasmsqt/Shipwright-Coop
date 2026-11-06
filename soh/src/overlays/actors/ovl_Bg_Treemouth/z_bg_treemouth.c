@@ -139,6 +139,13 @@ void func_808BC864(BgTreemouth* this, PlayState* play) {
     }
 }
 
+void BgTreemouth_StartConversation(BgTreemouth* this, PlayState* play, s32 intro) {
+    this->dyna.actor.flags &= ~ACTOR_FLAG_ATTENTION_ENABLED;
+    play->csCtx.segment = intro ? D_808BCE20 : D_808BD2A0;
+    gSaveContext.cutsceneTrigger = 1;
+    BgTreemouth_SetupAction(this, func_808BC9EC);
+}
+
 void func_808BC8B8(BgTreemouth* this, PlayState* play) {
     if ((!Flags_GetEventChkInf(EVENTCHKINF_DEKU_TREE_OPENED_MOUTH)) || LINK_IS_ADULT) {
         if (!LINK_IS_ADULT) {
@@ -146,18 +153,13 @@ void func_808BC8B8(BgTreemouth* this, PlayState* play) {
                 if (Actor_IsFacingAndNearPlayer(&this->dyna.actor, 1658.0f, 0x7530)) {
                     this->dyna.actor.flags |= ACTOR_FLAG_ATTENTION_ENABLED;
                     if (this->dyna.actor.isTargeted) {
-                        this->dyna.actor.flags &= ~ACTOR_FLAG_ATTENTION_ENABLED;
-                        play->csCtx.segment = D_808BD2A0;
-                        gSaveContext.cutsceneTrigger = 1;
-                        BgTreemouth_SetupAction(this, func_808BC9EC);
+                        BgTreemouth_StartConversation(this, play, false);
                     }
                 }
             } else if (Actor_IsFacingAndNearPlayer(&this->dyna.actor, 1658.0f, 0x4E20)) {
                 Flags_SetEventChkInf(EVENTCHKINF_MET_DEKU_TREE);
                 if (GameInteractor_Should(VB_PLAY_DEKU_TREE_INTRO_CS, true, this)) {
-                    play->csCtx.segment = D_808BCE20;
-                    gSaveContext.cutsceneTrigger = 1;
-                    BgTreemouth_SetupAction(this, func_808BC9EC);
+                    BgTreemouth_StartConversation(this, play, true);
                 }
             }
         }

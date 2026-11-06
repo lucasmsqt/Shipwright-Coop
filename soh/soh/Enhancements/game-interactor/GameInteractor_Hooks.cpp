@@ -200,6 +200,22 @@ void GameInteractor_ExecuteOnEnemyDefeat(void* actor) {
     GameInteractor::Instance->ExecuteHooksForFilter<GameInteractor::OnEnemyDefeat>(actor);
 }
 
+void GameInteractor_ExecuteOnEnemyDamage(Actor* actor, int32_t damage, int32_t reaction) {
+    GameInteractor::Instance->ExecuteHooks<GameInteractor::OnEnemyDamage>(actor, damage, reaction);
+}
+
+int32_t GameInteractor_ConsumeSharedEnemyDamage(Actor* actor, int32_t* reaction, PosRot* pose) {
+    int32_t damage = 0;
+    int32_t ignoredReaction = GI_ENEMY_HIT_NORMAL;
+    GameInteractor::Instance->ExecuteHooks<GameInteractor::OnConsumeSharedEnemyDamage>(
+        actor, &damage, reaction != nullptr ? reaction : &ignoredReaction, pose);
+    return damage;
+}
+
+void GameInteractor_ExecuteOnScriptedCutsceneStart() {
+    GameInteractor::Instance->ExecuteHooks<GameInteractor::OnScriptedCutsceneStart>();
+}
+
 void GameInteractor_ExecuteOnBossDefeat(void* actor) {
     GameInteractor::Instance->ExecuteHooks<GameInteractor::OnBossDefeat>(actor);
     GameInteractor::Instance->ExecuteHooksForID<GameInteractor::OnBossDefeat>(((Actor*)actor)->id, actor);

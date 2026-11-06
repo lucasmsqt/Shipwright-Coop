@@ -5,6 +5,7 @@
  */
 
 #include "z_obj_syokudai.h"
+#include "soh/Network/Anchor/RoomObjects.h"
 #include "overlays/actors/ovl_En_Arrow/z_en_arrow.h"
 #include "objects/gameplay_keep/gameplay_keep.h"
 #include "objects/object_syokudai/object_syokudai.h"
@@ -137,14 +138,43 @@ void ObjSyokudai_Update(Actor* thisx, PlayState* play2) {
     Vec3f tipToFlame;
     s32 pad;
     s32 pad2;
+    Vec3f sharedPosition;
+    s32 sharedTimer;
 
     litTimeScale = torchCount;
     if (torchCount == 10) {
         torchCount = 24;
     }
+    if (Anchor_ReadRoomObject(&this->actor, &sharedPosition, &sharedTimer, &this->sharedTorchState) == ANCHOR_TORCH_STATE) {
+        if (sharedTimer == 0 && this->litTimer > 0 && torchCount != 0 && sLitTorchCount > 0) {
+            sLitTorchCount--;
+        }
+        if (sharedTimer > 0 && this->litTimer == 0 && torchCount != 0) {
+            sLitTorchCount++;
+            if (sLitTorchCount >= torchCount) {
+                Flags_SetSwitch(play, switchFlag);
+                sharedTimer = -1;
+            }
+        }
+        if (sharedTimer == -1 && (torchType != 2 || torchCount != 0)) {
+            if (switchFlag < 0x20) {
+                play->actorCtx.flags.swch |= 1u << switchFlag;
+                gSaveContext.sceneFlags[play->sceneNum].swch |= 1u << switchFlag;
+            } else {
+                play->actorCtx.flags.tempSwch |= 1u << (switchFlag - 0x20);
+            }
+        }
+        if (sharedTimer != 0 && this->litTimer == 0) {
+            Audio_PlayActorSound2(&this->actor, NA_SE_EV_FLAME_IGNITION);
+        }
+        this->litTimer = sharedTimer;
+    }
     if (WaterBox_GetSurfaceImpl(play, &play->colCtx, this->actor.world.pos.x, this->actor.world.pos.z, &waterSurface,
                                 &dummy) &&
         ((waterSurface - this->actor.world.pos.y) > 52.0f)) {
+        if (this->litTimer != 0 && this->litTimer != 1) {
+            Anchor_SendRoomObject(&this->actor, ANCHOR_TORCH_STATE, 0);
+        }
         this->litTimer = 0;
         if (torchType == 1) {
             Flags_UnsetSwitch(play, switchFlag);
@@ -229,6 +259,7 @@ void ObjSyokudai_Update(Actor* thisx, PlayState* play2) {
                 }
                 Audio_PlaySfxGeneral(NA_SE_EV_FLAME_IGNITION, &this->actor.projectedPos, 4, &gSfxDefaultFreqAndVolScale,
                                      &gSfxDefaultFreqAndVolScale, &gSfxDefaultReverb);
+                Anchor_SendRoomObject(&this->actor, ANCHOR_TORCH_STATE, this->litTimer);
             }
         }
     }
@@ -244,6 +275,7 @@ void ObjSyokudai_Update(Actor* thisx, PlayState* play2) {
         this->litTimer--;
         if ((this->litTimer == 0) && (torchType != 0)) {
             sLitTorchCount--;
+            Anchor_SendRoomObject(&this->actor, ANCHOR_TORCH_STATE, 0);
         }
     }
     if (this->litTimer != 0) {

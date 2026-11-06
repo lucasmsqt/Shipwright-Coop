@@ -1,5 +1,6 @@
 #include "Anchor.h"
 #include "soh/Enhancements/nametag.h"
+#include <algorithm>
 
 extern "C" {
 #include "macros.h"
@@ -9,6 +10,7 @@ extern PlayState* gPlayState;
 
 void Player_UseItem(PlayState* play, Player* player, s32 item);
 void Player_Draw(Actor* actor, PlayState* play);
+void Player_SpawnDekuStickFlame(PlayState* play, Player* player, f32 scale);
 }
 
 static DamageTable DummyPlayerDamageTable = {
@@ -140,6 +142,12 @@ void DummyPlayer_Update(Actor* actor, PlayState* play) {
         (client.unk_862 > (s16)GID_MAXIMUM) ? (s16)GID_STONE_OF_AGONY : client.unk_862; // prevent OOB, show SoA if OOB
     player->unk_85C = client.unk_85C;
     player->av1.actionVar1 = client.actionVar1;
+    if (player->itemAction == PLAYER_IA_DEKU_STICK && client.stickBurnTimer > 0 &&
+        (actor->flags & ACTOR_FLAG_INSIDE_CULLING_VOLUME) &&
+        std::chrono::steady_clock::now() - client.lastPlayerUpdate < std::chrono::seconds(2)) {
+        const float fade = std::min((210 - client.stickBurnTimer) / 10.0f, client.stickBurnTimer / 20.0f);
+        Player_SpawnDekuStickFlame(play, player, std::clamp(fade, 0.0f, 1.0f));
+    }
 
     // Apply animation movement (Copied from Player_ApplyAnimMovementScaledByAge)
     Vec3f diff;

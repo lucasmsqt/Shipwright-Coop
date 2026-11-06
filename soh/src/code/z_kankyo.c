@@ -924,7 +924,7 @@ void Environment_Update(PlayState* play, EnvironmentContext* envCtx, LightContex
             }
         }
 
-        if ((pauseCtx->state == 0) && (gameOverCtx->state == GAMEOVER_INACTIVE)) {
+        if ((pauseCtx->state == 0 || Play_IsLivePause(play)) && (gameOverCtx->state == GAMEOVER_INACTIVE)) {
             if (((msgCtx->msgLength == 0) && (msgCtx->msgMode == 0)) ||
                 (((void)0, gSaveContext.gameMode) == GAMEMODE_END_CREDITS)) {
                 if ((envCtx->unk_1A == 0) && !FrameAdvance_IsEnabled(play) &&

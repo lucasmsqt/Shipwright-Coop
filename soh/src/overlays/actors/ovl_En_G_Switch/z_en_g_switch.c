@@ -425,6 +425,11 @@ void EnGSwitch_Update(Actor* thisx, PlayState* play) {
     s32 pad;
     EnGSwitch* this = (EnGSwitch*)thisx;
 
+    if (this->anchorSpectator) {
+        thisx->shape.rot.y += 0x3C0;
+        return;
+    }
+
     this->actionFunc(this, play);
     if (this->killTimer != 0) {
         this->killTimer--;

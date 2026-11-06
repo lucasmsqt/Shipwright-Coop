@@ -6,7 +6,7 @@
 
 struct EnSt;
 
-typedef void (*EnStActionFunc)(struct EnSt* this, PlayState* play);
+typedef void (*EnStActionFunc)(struct EnSt* skulltula, PlayState* play);
 
 typedef struct EnSt {
     /* 0x0000 */ Actor actor;
@@ -46,5 +46,17 @@ typedef struct EnSt {
     /* 0x0412 */ Vec3s jointTable[30];
     /* 0x04C6 */ Vec3s morphTable[30];
 } EnSt; // size = 0x057C
+
+typedef enum {
+    ENST_TEAM_PHASE_NONE = -1,
+    ENST_TEAM_PHASE_CEILING,
+    ENST_TEAM_PHASE_DESCENDING,
+    ENST_TEAM_PHASE_LANDING,
+    ENST_TEAM_PHASE_GROUND,
+    ENST_TEAM_PHASE_ASCENDING,
+    ENST_TEAM_PHASE_MAX
+} EnStTeamPhase;
+
+s32 EnSt_GetTeamPhase(const EnSt* skulltula);
 
 #endif

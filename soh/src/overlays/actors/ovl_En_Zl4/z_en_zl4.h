@@ -36,4 +36,6 @@ void func_80B5BB78(EnZl4* enZl4, PlayState* play);
 void EnZl4_Cutscene(EnZl4* enZl4, PlayState* play);
 s32 EnZl4_SetNextAnim(EnZl4* enZl4, s32 nextAnim);
 
+s32 EnZl4_StartTeamMeeting(Actor* actor, PlayState* play);
+
 #endif

@@ -352,6 +352,8 @@ u8 CheckBridgeRewardCount() {
     return bridgeRewardCount;
 }
 
+void Anchor_ApplyWorldTimeOnEntry(PlayState* play);
+
 void Play_Init(GameState* thisx) {
     PlayState* play = (PlayState*)thisx;
     GraphicsContext* gfxCtx = play->state.gfxCtx;
@@ -434,6 +436,8 @@ void Play_Init(GameState* thisx) {
         gSaveContext.dayTime = gSaveContext.nextDayTime;
         gSaveContext.skyboxTime = gSaveContext.nextDayTime;
     }
+
+    Anchor_ApplyWorldTimeOnEntry(play);
 
     if (gSaveContext.dayTime > 0xC000 || gSaveContext.dayTime < 0x4555) {
         gSaveContext.nightFlag = 1;

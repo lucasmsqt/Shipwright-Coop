@@ -22,6 +22,13 @@ typedef struct EnSkb {
     /* 0x028C */ BodyBreak bodyBreak;
     /* 0x02A4 */ ColliderJntSph collider;
     /* 0x02C4 */ ColliderJntSphElement colliderItem[2];
+    bool anchorReplica;
+    bool anchorEnding;
+    u8 anchorCleanupFrames;
 } EnSkb; // size = 0x0344
+
+s32 EnSkb_GetTeamPhase(const EnSkb* stalchild);
+void EnSkb_ApplyTeamState(EnSkb* stalchild, PlayState* play, s32 phase, s32 health, f32 offset, s32 attacking);
+void EnSkb_EndTeamReplica(EnSkb* stalchild, PlayState* play);
 
 #endif

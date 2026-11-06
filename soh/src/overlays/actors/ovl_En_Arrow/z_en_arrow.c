@@ -5,6 +5,7 @@
  */
 
 #include "z_en_arrow.h"
+#include "soh/Network/Anchor/CombatSync.h"
 #include "objects/gameplay_keep/gameplay_keep.h"
 #include "objects/object_gi_nuts/object_gi_nuts.h"
 
@@ -207,9 +208,37 @@ void EnArrow_Destroy(Actor* thisx, PlayState* play) {
     }
 }
 
+bool EnArrow_IsSharedType(s16 params) {
+    return (params >= ARROW_NORMAL_LIT && params <= ARROW_LIGHT) || params == ARROW_SEED;
+}
+
+static void EnArrow_StartFlight(EnArrow* this) {
+    EnArrow_SetupAction(this, EnArrow_Fly);
+    Math_Vec3f_Copy(&this->unk_210, &this->actor.world.pos);
+
+    if (this->actor.params >= ARROW_SEED) {
+        Actor_SetProjectileSpeed(&this->actor, 80.0f);
+        this->timer = 15;
+        this->actor.shape.rot.x = this->actor.shape.rot.y = this->actor.shape.rot.z = 0;
+    } else {
+        Actor_SetProjectileSpeed(&this->actor, 150.0f);
+        this->timer = 12;
+    }
+}
+
+void EnArrow_StartReplica(EnArrow* this, u32 owner, u32 shot) {
+    this->anchorReplica = true;
+    this->anchorOwner = owner;
+    this->anchorShot = shot;
+    EnArrow_StartFlight(this);
+}
+
 void EnArrow_Shoot(EnArrow* this, PlayState* play) {
     Player* player = GET_PLAYER(play);
 
+    if (this->actor.parent == &player->actor) {
+        this->fromLocalLink = true;
+    }
     if (this->actor.parent == NULL) {
         if ((this->actor.params != ARROW_NUT) && (player->unk_A73 == 0)) {
             Actor_Kill(&this->actor);
@@ -235,16 +264,9 @@ void EnArrow_Shoot(EnArrow* this, PlayState* play) {
                 break;
         }
 
-        EnArrow_SetupAction(this, EnArrow_Fly);
-        Math_Vec3f_Copy(&this->unk_210, &this->actor.world.pos);
-
-        if (this->actor.params >= ARROW_SEED) {
-            Actor_SetProjectileSpeed(&this->actor, 80.0f);
-            this->timer = 15;
-            this->actor.shape.rot.x = this->actor.shape.rot.y = this->actor.shape.rot.z = 0;
-        } else {
-            Actor_SetProjectileSpeed(&this->actor, 150.0f);
-            this->timer = 12;
+        EnArrow_StartFlight(this);
+        if (this->fromLocalLink && EnArrow_IsSharedType(this->actor.params)) {
+            Anchor_SendPlayerArrow(&this->actor, false);
         }
     }
 }
@@ -318,6 +340,10 @@ void EnArrow_Fly(EnArrow* this, PlayState* play) {
                 (this->collider.base.atFlags & AT_HIT);
 
     if (atTouched || this->touchedPoly) {
+        if (this->anchorShot != 0 && !this->anchorReplica) {
+            Anchor_SendPlayerArrow(&this->actor, true);
+            this->anchorShot = 0;
+        }
         if (this->actor.params >= ARROW_SEED) {
             if (atTouched) {
                 this->actor.world.pos.x = (this->actor.world.pos.x + this->actor.prevPos.x) * 0.5f;
@@ -386,7 +412,9 @@ void EnArrow_Fly(EnArrow* this, PlayState* play) {
         if ((this->touchedPoly =
                  BgCheck_ProjectileLineTest(&play->colCtx, &this->actor.prevPos, &this->actor.world.pos, &hitPoint,
                                             &this->actor.wallPoly, true, true, true, true, &bgId))) {
-            func_8002F9EC(play, &this->actor, this->actor.wallPoly, bgId, &hitPoint);
+            if (!this->anchorReplica) {
+                func_8002F9EC(play, &this->actor, this->actor.wallPoly, bgId, &hitPoint);
+            }
             Math_Vec3f_Copy(&posCopy, &this->actor.world.pos);
             Math_Vec3f_Copy(&this->actor.world.pos, &hitPoint);
         }
@@ -445,12 +473,12 @@ void EnArrow_Update(Actor* thisx, PlayState* play) {
     EnArrow* this = (EnArrow*)thisx;
     Player* player = GET_PLAYER(play);
 
-    if (this->isCsNut || ((this->actor.params >= ARROW_NORMAL_LIT) && (player->unk_A73 != 0)) ||
+    if (this->anchorReplica || this->isCsNut || ((this->actor.params >= ARROW_NORMAL_LIT) && (player->unk_A73 != 0)) ||
         !Player_InBlockingCsMode(play, player)) {
         this->actionFunc(this, play);
     }
 
-    if ((this->actor.params >= ARROW_FIRE) && (this->actor.params <= ARROW_0E)) {
+    if (!this->anchorReplica && (this->actor.params >= ARROW_FIRE) && (this->actor.params <= ARROW_0E)) {
         s16 elementalActorIds[] = { ACTOR_ARROW_FIRE, ACTOR_ARROW_ICE,  ACTOR_ARROW_LIGHT,
                                     ACTOR_ARROW_FIRE, ACTOR_ARROW_FIRE, ACTOR_ARROW_FIRE };
 
@@ -486,7 +514,8 @@ void func_809B4800(EnArrow* this, PlayState* play) {
             addBlureVertex = this->actor.params <= ARROW_LIGHT;
 
             if (this->hitActor == NULL) {
-                addBlureVertex &= func_80090480(play, &this->collider, &this->weaponInfo, &sp44, &sp38);
+                addBlureVertex &= func_80090480(play, this->anchorReplica ? NULL : &this->collider, &this->weaponInfo,
+                                              &sp44, &sp38);
             } else {
                 if (addBlureVertex) {
                     if ((sp44.x == this->weaponInfo.tip.x) && (sp44.y == this->weaponInfo.tip.y) &&

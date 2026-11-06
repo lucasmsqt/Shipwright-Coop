@@ -133,6 +133,18 @@ void Anchor::ProcessIncomingPacketQueue() {
                 HandlePacket_DamagePlayer(payload);
             else if (packetType == DISABLE_ANCHOR)
                 HandlePacket_DisableAnchor(payload);
+            else if (packetType == ENEMY_DAMAGE)
+                HandlePacket_EnemyDamage(payload);
+            else if (packetType == ENEMY_EMERGED)
+                HandlePacket_EnemyEmerged(payload);
+            else if (packetType == ENEMY_MELEE_HIT || packetType == ENEMY_ARROW_HIT)
+                HandlePacket_EnemyHit(payload, packetType == ENEMY_ARROW_HIT);
+            else if (packetType == PLAYER_ARROW)
+                HandlePacket_PlayerArrow(payload);
+            else if (packetType == SCRUB_SHOT)
+                HandlePacket_ScrubShot(payload);
+            else if (packetType == ROOM_OBJECT)
+                HandlePacket_RoomObject(payload);
             else if (packetType == ENTRANCE_DISCOVERED)
                 HandlePacket_EntranceDiscovered(payload);
             else if (packetType == GAME_COMPLETE)
@@ -157,6 +169,10 @@ void Anchor::ProcessIncomingPacketQueue() {
                 HandlePacket_SetCheckStatus(payload);
             else if (packetType == SET_FLAG)
                 HandlePacket_SetFlag(payload);
+            else if (packetType == TEAM_CUTSCENE)
+                HandlePacket_TeamCutscene(payload);
+            else if (packetType == TEAM_CUTSCENE_INPUT)
+                HandlePacket_TeamCutsceneInput(payload);
             else if (packetType == TELEPORT_TO)
                 HandlePacket_TeleportTo(payload);
             else if (packetType == UNSET_FLAG)
@@ -169,6 +185,8 @@ void Anchor::ProcessIncomingPacketQueue() {
                 HandlePacket_UpdateRoomState(payload);
             else if (packetType == UPDATE_DUNGEON_ITEMS)
                 HandlePacket_UpdateDungeonItems(payload);
+            else if (packetType == WORLD_STATE)
+                HandlePacket_WorldState(payload);
         } catch (const std::exception& e) {
             SPDLOG_ERROR("[Anchor] Exception while processing incoming packet {}", e.what());
             SPDLOG_ERROR("[Anchor] Packet: {}", payload.dump());
@@ -179,6 +197,12 @@ void Anchor::ProcessIncomingPacketQueue() {
 }
 
 // MARK: - Misc/Helpers
+
+bool Anchor::IsSharedTeamMember(uint32_t clientId) const {
+    const auto client = clients.find(clientId);
+    return clientId != ownClientId && client != clients.end() && client->second.online &&
+           client->second.teamId == CVarGetString(CVAR_REMOTE_ANCHOR("TeamId"), "default");
+}
 
 // Kills all existing anchor actors and respawns them with the new client data
 

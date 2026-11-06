@@ -1,4 +1,7 @@
 #include "z_en_encount1.h"
+
+s32 Anchor_ShouldSpawnStalchildren(PlayState* play);
+void Anchor_RegisterStalchild(PlayState* play, Actor* actor);
 #include "vt.h"
 #include "overlays/actors/ovl_En_Tite/z_en_tite.h"
 #include "soh/Enhancements/game-interactor/GameInteractor_Hooks.h"
@@ -240,6 +243,9 @@ void EnEncount1_SpawnStalchildOrWolfos(EnEncount1* this, PlayState* play) {
         this->killCount = 0;
         return;
     }
+    if (play->sceneNum == SCENE_HYRULE_FIELD && !Anchor_ShouldSpawnStalchildren(play)) {
+        return;
+    }
 
     this->outOfRangeTimer = 0;
     spawnPos = this->actor.world.pos;
@@ -313,8 +319,12 @@ void EnEncount1_SpawnStalchildOrWolfos(EnEncount1* this, PlayState* play) {
                 continue;
             }
 
-            if (Actor_SpawnAsChild(&play->actorCtx, &this->actor, play, spawnId, spawnPos.x, spawnPos.y, spawnPos.z, 0,
-                                   0, 0, spawnParams) != NULL) {
+            Actor* spawned = Actor_SpawnAsChild(&play->actorCtx, &this->actor, play, spawnId, spawnPos.x, spawnPos.y,
+                                                spawnPos.z, 0, 0, 0, spawnParams);
+            if (spawned != NULL) {
+                if (spawned->id == ACTOR_EN_SKB && play->sceneNum == SCENE_HYRULE_FIELD) {
+                    Anchor_RegisterStalchild(play, spawned);
+                }
                 this->curNumSpawn++;
                 if (this->curNumSpawn >= this->maxCurSpawns) {
                     this->fieldSpawnTimer = 100;

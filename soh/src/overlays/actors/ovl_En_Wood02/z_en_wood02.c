@@ -5,6 +5,7 @@
  */
 
 #include "z_en_wood02.h"
+#include "soh/Network/Anchor/RoomObjects.h"
 #include "objects/object_wood02/object_wood02.h"
 #include "soh/Enhancements/game-interactor/GameInteractor_Hooks.h"
 #include <libultraship/bridge/consolevariablebridge.h>
@@ -366,8 +367,7 @@ void EnWood02_Update(Actor* thisx, PlayState* play2) {
                 } else if (this->actor.home.rot.z != 0) {
                     this->actor.home.rot.z &= 0x1FFF;
                     this->actor.home.rot.z |= 0xE000;
-                    Actor_Spawn(&play->actorCtx, play, ACTOR_EN_SW, dropsSpawnPt.x, dropsSpawnPt.y, dropsSpawnPt.z, 0,
-                                this->actor.world.rot.y, 0, this->actor.home.rot.z);
+                    Anchor_SpawnTreeSkulltula(play, &dropsSpawnPt, this->actor.world.rot.y, this->actor.home.rot.z);
                     this->actor.home.rot.z = 0;
                 }
             }

@@ -5,9 +5,11 @@
  */
 
 #include "z_en_dekunuts.h"
+#include "overlays/actors/ovl_En_Nutsball/z_en_nutsball.h"
 #include "overlays/effects/ovl_Effect_Ss_Hahen/z_eff_ss_hahen.h"
 #include "objects/object_dekunuts/object_dekunuts.h"
 #include "soh/Enhancements/game-interactor/GameInteractor_Hooks.h"
+#include "soh/Network/Anchor/ScrubShot.h"
 
 #define FLAGS (ACTOR_FLAG_ATTENTION_ENABLED | ACTOR_FLAG_HOSTILE)
 
@@ -204,12 +206,14 @@ void EnDekunuts_SetupGasp(EnDekunuts* this) {
     this->actionFunc = EnDekunuts_Gasp;
 }
 
-void EnDekunuts_SetupBeDamaged(EnDekunuts* this) {
+void EnDekunuts_SetupBeDamaged(EnDekunuts* this, bool localHit) {
     Animation_MorphToPlayOnce(&this->skelAnime, &gDekuNutsDamageAnim, -3.0f);
-    if ((this->collider.info.acHitInfo->toucher.dmgFlags & 0x1F824) != 0) {
-        this->actor.world.rot.y = this->collider.base.ac->world.rot.y;
-    } else {
-        this->actor.world.rot.y = Actor_WorldYawTowardActor(&this->actor, this->collider.base.ac) + 0x8000;
+    if (localHit) {
+        if ((this->collider.info.acHitInfo->toucher.dmgFlags & 0x1F824) != 0) {
+            this->actor.world.rot.y = this->collider.base.ac->world.rot.y;
+        } else {
+            this->actor.world.rot.y = Actor_WorldYawTowardActor(&this->actor, this->collider.base.ac) + 0x8000;
+        }
     }
     this->collider.base.acFlags &= ~AC_ON;
     this->actionFunc = EnDekunuts_BeDamaged;
@@ -310,8 +314,7 @@ void EnDekunuts_ThrowNut(EnDekunuts* this, PlayState* play) {
         spawnPos.x = this->actor.world.pos.x + (Math_SinS(this->actor.shape.rot.y) * 23.0f);
         spawnPos.y = this->actor.world.pos.y + 12.0f;
         spawnPos.z = this->actor.world.pos.z + (Math_CosS(this->actor.shape.rot.y) * 23.0f);
-        if (Actor_Spawn(&play->actorCtx, play, ACTOR_EN_NUTSBALL, spawnPos.x, spawnPos.y, spawnPos.z,
-                        this->actor.shape.rot.x, this->actor.shape.rot.y, this->actor.shape.rot.z, 0) != NULL) {
+        if (EnNutsball_SpawnFromScrub(play, &this->actor, &spawnPos, 0) != NULL) {
             Audio_PlayActorSound2(&this->actor, NA_SE_EN_NUTS_THROW);
         }
     } else if ((this->animFlagAndTimer > 1) && Animation_OnFrame(&this->skelAnime, 12.0f)) {
@@ -445,8 +448,36 @@ void EnDekunuts_Die(EnDekunuts* this, PlayState* play) {
 }
 
 void EnDekunuts_ColliderCheck(EnDekunuts* this, PlayState* play) {
+    s32 oldHealth = this->actor.colChkInfo.health;
+    if (oldHealth > 0 && !(this->collider.base.acFlags & AC_HIT)) {
+        s32 reaction = GI_ENEMY_HIT_NORMAL;
+        s32 damage = GameInteractor_ConsumeSharedEnemyDamage(&this->actor, &reaction, NULL);
+        if (damage > 0 || reaction == GI_ENEMY_HIT_STUN || reaction == GI_ENEMY_HIT_SCRUB_RUN ||
+            reaction == GI_ENEMY_HIT_DEFEAT) {
+            this->actor.colChkInfo.health = reaction == GI_ENEMY_HIT_DEFEAT ? 0 : CLAMP_MIN(oldHealth - damage, 0);
+            this->anchorHitGrace = 8;
+            if (reaction == GI_ENEMY_HIT_SCRUB_RUN) {
+                EnDekunuts_SetupBeginRun(this);
+            } else if (reaction == GI_ENEMY_HIT_STUN) {
+                EnDekunuts_SetupBeStunned(this);
+            } else {
+                this->actor.colChkInfo.mass = 0x32;
+                EnDekunuts_SetupBeDamaged(this, false);
+                if (this->actor.colChkInfo.health == 0) {
+                    Enemy_StartFinishingBlow(play, &this->actor);
+                }
+            }
+            return;
+        }
+    }
     if (this->collider.base.acFlags & AC_HIT) {
         this->collider.base.acFlags &= ~AC_HIT;
+        if (this->collider.base.ac->id == ACTOR_EN_NUTSBALL) {
+            EnNutsball* shot = (EnNutsball*)this->collider.base.ac;
+            if (shot->sharedOwner != 0 && !shot->sharedReflectedLocally) {
+                return;
+            }
+        }
         Actor_SetDropFlag(&this->actor, &this->collider.info, 1);
         if (this->actor.colChkInfo.mass == 0x32) {
             if ((this->actor.colChkInfo.damageEffect != 0) || (this->actor.colChkInfo.damage != 0)) {
@@ -454,31 +485,110 @@ void EnDekunuts_ColliderCheck(EnDekunuts* this, PlayState* play) {
                     if (this->actor.colChkInfo.damageEffect == 2) {
                         EffectSsFCircle_Spawn(play, &this->actor, &this->actor.world.pos, 40, 50);
                     }
-                    EnDekunuts_SetupBeDamaged(this);
+                    EnDekunuts_SetupBeDamaged(this, true);
+                    this->anchorHitGrace = 8;
                     if (Actor_ApplyDamage(&this->actor) == 0) {
+                        GameInteractor_ExecuteOnEnemyDamage(&this->actor, oldHealth, GI_ENEMY_HIT_DEFEAT);
                         Enemy_StartFinishingBlow(play, &this->actor);
+                    } else {
+                        GameInteractor_ExecuteOnEnemyDamage(&this->actor, oldHealth - this->actor.colChkInfo.health,
+                                                            GI_ENEMY_HIT_NORMAL);
                     }
                 } else if (this->actionFunc != EnDekunuts_BeStunned) {
                     EnDekunuts_SetupBeStunned(this);
+                    this->anchorHitGrace = 8;
+                    GameInteractor_ExecuteOnEnemyDamage(&this->actor, 0, GI_ENEMY_HIT_STUN);
                 }
             }
         } else {
             EnDekunuts_SetupBeginRun(this);
+            this->anchorHitGrace = 8;
+            GameInteractor_ExecuteOnEnemyDamage(&this->actor, 0, GI_ENEMY_HIT_SCRUB_RUN);
         }
     } else if ((this->actor.colChkInfo.mass == MASS_IMMOVABLE) && (play->actorCtx.unk_02 != 0)) {
         EnDekunuts_SetupBeginRun(this);
+        this->anchorHitGrace = 8;
+        GameInteractor_ExecuteOnEnemyDamage(&this->actor, 0, GI_ENEMY_HIT_SCRUB_RUN);
     }
+}
+
+typedef struct {
+    EnDekunutsActionFunc action;
+    void (*setup)(EnDekunuts*);
+} EnDekunutsTeamPhase;
+
+static const EnDekunutsTeamPhase sTeamPhases[] = {
+    { EnDekunuts_Wait, EnDekunuts_SetupWait },
+    { EnDekunuts_LookAround, EnDekunuts_SetupLookAround },
+    { EnDekunuts_Stand, EnDekunuts_SetupStand },
+    { EnDekunuts_ThrowNut, EnDekunuts_SetupThrowNut },
+    { EnDekunuts_Burrow, EnDekunuts_SetupBurrow },
+    { EnDekunuts_BeginRun, EnDekunuts_SetupBeginRun },
+    { EnDekunuts_Run, EnDekunuts_SetupRun },
+    { EnDekunuts_Gasp, EnDekunuts_SetupGasp },
+    { EnDekunuts_BeDamaged, NULL },
+    { EnDekunuts_BeStunned, EnDekunuts_SetupBeStunned },
+};
+
+s32 EnDekunuts_GetTeamMotion(Actor* actor, ScrubMotion* motion) {
+    EnDekunuts* this = (EnDekunuts*)actor;
+
+    if (actor->params == DEKUNUTS_FLOWER || actor->colChkInfo.health == 0) {
+        return false;
+    }
+    for (s32 phase = 0; phase < ARRAY_COUNT(sTeamPhases); phase++) {
+        if (this->actionFunc == sTeamPhases[phase].action) {
+            motion->phase = phase;
+            motion->timer = this->animFlagAndTimer;
+            motion->frame = this->skelAnime.curFrame;
+            motion->speed = this->skelAnime.playSpeed;
+            motion->height = this->collider.dim.height;
+            motion->attackable = (this->collider.base.acFlags & AC_ON) != 0;
+            return true;
+        }
+    }
+    return false;
+}
+
+static void EnDekunuts_ApplyTeamMotion(EnDekunuts* this, const ScrubMotion* motion) {
+    const EnDekunutsTeamPhase* phase = &sTeamPhases[motion->phase];
+
+    if (this->actionFunc != phase->action) {
+        Vec3f position = this->actor.world.pos;
+        if (phase->setup != NULL) {
+            phase->setup(this);
+        } else {
+            EnDekunuts_SetupBeDamaged(this, false);
+        }
+        this->actor.world.pos = position;
+        this->runDirection = this->actor.world.rot.y;
+    }
+    this->animFlagAndTimer = motion->timer;
+    this->skelAnime.curFrame = CLAMP_MAX(motion->frame, this->skelAnime.animLength - 1.0f);
+    this->skelAnime.playSpeed = 0.0f;
+    SkelAnime_Update(&this->skelAnime);
+    this->skelAnime.playSpeed = motion->speed;
+    this->collider.dim.height = motion->height;
+    this->collider.base.acFlags = (this->collider.base.acFlags & ~AC_ON) | (motion->attackable ? AC_ON : 0);
+    this->actor.colChkInfo.mass = motion->phase < 5 ? MASS_IMMOVABLE : 0x32;
 }
 
 void EnDekunuts_Update(Actor* thisx, PlayState* play) {
     EnDekunuts* this = (EnDekunuts*)thisx;
-    s32 pad;
+    ScrubMotion motion;
 
     if (this->actor.params != DEKUNUTS_FLOWER) {
+        DECR(this->anchorHitGrace);
         EnDekunuts_ColliderCheck(this, play);
-        this->actionFunc(this, play);
-        Actor_MoveXZGravity(&this->actor);
-        Actor_UpdateBgCheckInfo(play, &this->actor, 20.0f, this->collider.dim.radius, this->collider.dim.height, 0x1D);
+        if (this->actor.colChkInfo.health > 0 && this->anchorHitGrace == 0 &&
+            Anchor_ApplyScrubPose(&this->actor, &motion)) {
+            EnDekunuts_ApplyTeamMotion(this, &motion);
+        } else {
+            this->actionFunc(this, play);
+            Actor_MoveXZGravity(&this->actor);
+            Actor_UpdateBgCheckInfo(play, &this->actor, 20.0f, this->collider.dim.radius, this->collider.dim.height,
+                                    0x1D);
+        }
         Collider_UpdateCylinder(&this->actor, &this->collider);
         if (this->collider.base.acFlags & AC_ON) {
             CollisionCheck_SetAC(play, &play->colChkCtx, &this->collider.base);

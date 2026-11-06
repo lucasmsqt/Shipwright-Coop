@@ -712,6 +712,20 @@ void EnGoma_Update(Actor* thisx, PlayState* play) {
     EnGoma* this = (EnGoma*)thisx;
     s32 pad;
     Player* player = GET_PLAYER(play);
+    Actor* parent = thisx->parent;
+    if (thisx->params >= 0 && thisx->params < 3 && parent != NULL && thisx->colChkInfo.health != 0 &&
+        parent == Actor_Find(&play->actorCtx, ACTOR_BOSS_GOMA, ACTORCAT_BOSS) &&
+        ((BossGoma*)parent)->childrenGohmaState[thisx->params] == -1) {
+        if (this->actionFunc == EnGoma_Egg || this->actionFunc == EnGoma_EggFallToGround) {
+            EnGoma_SpawnHatchDebris(this, play);
+            Actor_Kill(thisx);
+            GameInteractor_ExecuteOnEnemyDefeat(thisx);
+            return;
+        }
+        thisx->colChkInfo.health = 0;
+        this->invincibilityTimer = 255;
+        EnGoma_SetupDead(this);
+    }
 
     if (this->actionTimer != 0) {
         this->actionTimer--;

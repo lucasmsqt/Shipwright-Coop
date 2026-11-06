@@ -54,6 +54,8 @@ void EnZl4_Init(Actor* thisx, PlayState* play);
 void EnZl4_Destroy(Actor* thisx, PlayState* play);
 void EnZl4_Update(Actor* thisx, PlayState* play);
 void EnZl4_Draw(Actor* thisx, PlayState* play);
+void Anchor_StartZeldaMeeting(PlayState* play);
+void Anchor_FinishZeldaMeeting(void);
 
 void EnZl4_Cutscene(EnZl4* this, PlayState* play);
 void EnZl4_Idle(EnZl4* this, PlayState* play);
@@ -446,6 +448,24 @@ s32 EnZl4_CsWaitForPlayer(EnZl4* this, PlayState* play) {
     playerx->world.pos.z += 56.0f * Math_CosS(rotY);
     playerx->speedXZ = 0.0f;
     player->linearVelocity = 0.0f;
+    return true;
+}
+
+s32 EnZl4_StartTeamMeeting(Actor* actor, PlayState* play) {
+    EnZl4* this = (EnZl4*)actor;
+    Player* player = GET_PLAYER(play);
+    if ((this->actionFunc != EnZl4_Cutscene || this->csState != ZL4_CS_WAIT) &&
+        this->actionFunc != EnZl4_Idle) {
+        return false;
+    }
+    player->actor.world.pos = actor->world.pos;
+    player->actor.world.pos.x += 56.0f * Math_SinS(actor->shape.rot.y);
+    player->actor.world.pos.z += 56.0f * Math_CosS(actor->shape.rot.y);
+    player->actor.speedXZ = player->linearVelocity = 0.0f;
+    Player_SetCsActionWithHaltedActors(play, actor, 8);
+    this->actionFunc = EnZl4_Cutscene;
+    this->csState = ZL4_CS_START;
+    this->talkState = 0;
     return true;
 }
 
@@ -1133,6 +1153,7 @@ void EnZl4_Cutscene(EnZl4* this, PlayState* play) {
     switch (this->csState) {
         case ZL4_CS_WAIT:
             if (EnZl4_CsWaitForPlayer(this, play)) {
+                Anchor_StartZeldaMeeting(play);
                 this->talkState = 0;
                 this->csState++;
             }
@@ -1191,6 +1212,7 @@ void EnZl4_Cutscene(EnZl4* this, PlayState* play) {
                 gSaveContext.prevHudVisibilityMode = 0x32;
                 Flags_SetEventChkInf(EVENTCHKINF_OBTAINED_ZELDAS_LETTER);
                 this->actionFunc = EnZl4_Idle;
+                Anchor_FinishZeldaMeeting();
             }
             break;
     }

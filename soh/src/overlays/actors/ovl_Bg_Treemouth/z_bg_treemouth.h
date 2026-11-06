@@ -17,6 +17,7 @@ typedef struct BgTreemouth {
 
 // #region SoH [Enhancements] Externed for time savers
 void BgTreemouth_SetupAction(BgTreemouth* actor, BgTreemouthActionFunc actionFunc);
+void BgTreemouth_StartConversation(BgTreemouth* actor, PlayState* play, s32 intro);
 void func_808BC6F8(BgTreemouth* actor, PlayState* play);
 // #endregion
 

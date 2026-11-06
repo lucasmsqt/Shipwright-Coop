@@ -25,6 +25,7 @@ void GameInteractor_ExecuteOnSceneFlagUnset(int16_t sceneNum, int16_t flagType, 
 void GameInteractor_ExecuteOnFlagSet(int16_t flagType, int16_t flag);
 void GameInteractor_ExecuteOnFlagUnset(int16_t flagType, int16_t flag);
 void GameInteractor_ExecuteOnSceneSpawnActors();
+void GameInteractor_ExecuteOnScriptedCutsceneStart();
 void GameInteractor_ExecuteOnLinkSkeletonInit();
 void GameInteractor_ExecuteOnLinkEquipmentChange();
 void GameInteractor_ExecuteOnPlayerUpdate();
@@ -42,6 +43,24 @@ void GameInteractor_ExecuteOnActorKill(void* actor);
 bool GameInteractor_ShouldActorDestroy(void* actor);
 void GameInteractor_ExecuteOnActorDestroy(void* actor);
 void GameInteractor_ExecuteOnEnemyDefeat(void* actor);
+typedef enum {
+    GI_ENEMY_HIT_NORMAL,
+    GI_ENEMY_HIT_STUN,
+    GI_ENEMY_HIT_SWAY,
+    GI_ENEMY_HIT_PRUNED,
+    GI_ENEMY_HIT_FIRE,
+    GI_ENEMY_HIT_RECOIL,
+    GI_ENEMY_HIT_GOHMA_SEED_STUN,
+    GI_ENEMY_HIT_GOHMA_NUT_STUN,
+    GI_ENEMY_HIT_GOHMA_FALL,
+    GI_ENEMY_HIT_KAREBABA_KILLED,
+    GI_ENEMY_HIT_SKULLTULA_ARROW,
+    GI_ENEMY_HIT_DEFEAT,
+    GI_ENEMY_HIT_SCRUB_RUN,
+    GI_ENEMY_HIT_MAX,
+} GIEnemyHitReaction;
+void GameInteractor_ExecuteOnEnemyDamage(Actor* actor, int32_t damage, int32_t reaction);
+int32_t GameInteractor_ConsumeSharedEnemyDamage(Actor* actor, int32_t* reaction, PosRot* pose);
 void GameInteractor_ExecuteOnBossDefeat(void* actor);
 void GameInteractor_ExecuteOnTimestamp(u8 item);
 void GameInteractor_ExecuteOnPlayerBonk();

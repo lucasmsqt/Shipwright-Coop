@@ -812,6 +812,15 @@ void EnMd_Update(Actor* thisx, PlayState* play) {
     EnMd* this = (EnMd*)thisx;
     s32 pad;
 
+    if (play->sceneNum == SCENE_KOKIRI_FOREST &&
+        Flags_GetEventChkInf(EVENTCHKINF_SPOKE_TO_MIDO_AFTER_DEKU_TREES_DEATH)) {
+        if (play->msgCtx.talkActor == thisx) {
+            Message_CloseTextbox(play);
+        }
+        Actor_Kill(thisx);
+        return;
+    }
+
     Collider_UpdateCylinder(&this->actor, &this->collider);
     CollisionCheck_SetOC(play, &play->colChkCtx, &this->collider.base);
     SkelAnime_Update(&this->skelAnime);

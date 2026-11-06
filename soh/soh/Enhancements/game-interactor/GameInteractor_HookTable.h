@@ -23,6 +23,7 @@ DEFINE_HOOK(OnSceneFlagUnset, (int16_t sceneNum, int16_t flagType, int16_t flag)
 DEFINE_HOOK(OnFlagSet, (int16_t flagType, int16_t flag));
 DEFINE_HOOK(OnFlagUnset, (int16_t flagType, int16_t flag));
 DEFINE_HOOK(OnSceneSpawnActors, ());
+DEFINE_HOOK(OnScriptedCutsceneStart, ());
 DEFINE_HOOK(OnLinkSkeletonInit, ());
 DEFINE_HOOK(OnLinkEquipmentChange, ());
 DEFINE_HOOK(OnPlayerUpdate, ());
@@ -42,6 +43,8 @@ DEFINE_HOOK(OnActorKill, (void* actor));
 DEFINE_HOOK(ShouldActorDestroy, (void* actor, bool* result));
 DEFINE_HOOK(OnActorDestroy, (void* actor));
 DEFINE_HOOK(OnEnemyDefeat, (void* actor));
+DEFINE_HOOK(OnEnemyDamage, (Actor* actor, int32_t damage, int32_t reaction));
+DEFINE_HOOK(OnConsumeSharedEnemyDamage, (Actor* actor, int32_t* damage, int32_t* reaction, PosRot* pose));
 DEFINE_HOOK(OnBossDefeat, (void* actor));
 DEFINE_HOOK(OnTimestamp, (u8 item));
 DEFINE_HOOK(OnPlayerBonk, ());

@@ -5,6 +5,7 @@
  */
 
 #include "z_en_ta.h"
+#include "soh/Network/Anchor/RoomObjects.h"
 #include "vt.h"
 #include "objects/object_ta/object_ta.h"
 #include "soh/OTRGlobals.h"
@@ -316,6 +317,9 @@ void EnTa_WakeUp(EnTa* this, PlayState* play) {
         Animation_PlayOnce(&this->skelAnime, &gTalonWakeUpAnim);
         this->currentAnimation = &gTalonStandAnim;
         Audio_PlayActorSound2(&this->actor, NA_SE_VO_TA_SURPRISE);
+        if (play->sceneNum == SCENE_HYRULE_CASTLE) {
+            Anchor_SendRoomObject(&this->actor, ANCHOR_TALON_AWAKENING, 0);
+        }
     }
 }
 
@@ -438,7 +442,7 @@ void EnTa_RunAwayRunSouth(EnTa* this, PlayState* play) {
     func_80033480(play, &this->actor.world.pos, 50.0f, 2, 250, 20, 1);
     EnTa_RunWithAccelerationAndSfx(this, play);
 
-    if (this->timer == 20) {
+    if (this->timer == 20 && play->msgCtx.talkActor == &this->actor) {
         Message_CloseTextbox(play);
     }
     if (this->timer == 0) {
@@ -1141,9 +1145,38 @@ void EnTa_AnimRunToEnd(EnTa* this) {
     }
 }
 
+static bool EnTa_HasSharedAwakening(Actor* actor) {
+    Vec3f position;
+    s32 detail;
+    u64 seen = 0;
+    return Anchor_ReadRoomObject(actor, &position, &detail, &seen) == ANCHOR_TALON_AWAKENING;
+}
+
 void EnTa_Update(Actor* thisx, PlayState* play) {
     EnTa* this = (EnTa*)thisx;
     s32 pad;
+
+    if (play->sceneNum == SCENE_HYRULE_CASTLE) {
+        bool sleeping = this->actionFunc == EnTa_IdleAsleepInCastle || this->actionFunc == EnTa_SleepTalkInCastle;
+        if (Flags_GetEventChkInf(EVENTCHKINF_TALON_RETURNED_FROM_CASTLE) &&
+            (sleeping || this->actionFunc == EnTa_IdleAwakeInCastle)) {
+            EnTa_SetupAction(this, EnTa_RunAwayStart, EnTa_AnimRepeatCurrent);
+            this->timer = 5;
+            Animation_PlayOnce(&this->skelAnime, &gTalonRunTransitionAnim);
+            this->currentAnimation = &gTalonRunAnim;
+        } else if (sleeping && (Flags_GetEventChkInf(EVENTCHKINF_TALON_WOKEN_IN_CASTLE) || EnTa_HasSharedAwakening(thisx))) {
+            if (play->msgCtx.talkActor == thisx) {
+                Message_CloseTextbox(play);
+            }
+            EnTa_SetupAction(this, EnTa_IdleAwakeInCastle, EnTa_AnimRepeatCurrent);
+            this->eyeIndex = 0;
+            this->blinkTimer = 1;
+            this->blinkFunc = EnTa_BlinkAdvanceState;
+            Animation_PlayOnce(&this->skelAnime, &gTalonWakeUpAnim);
+            this->currentAnimation = &gTalonStandAnim;
+            Audio_PlayActorSound2(thisx, NA_SE_VO_TA_SURPRISE);
+        }
+    }
 
     Collider_UpdateCylinder(&this->actor, &this->collider);
     CollisionCheck_SetOC(play, &play->colChkCtx, &this->collider.base);

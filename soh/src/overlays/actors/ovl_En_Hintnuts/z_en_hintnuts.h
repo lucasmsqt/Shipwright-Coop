@@ -18,6 +18,8 @@ typedef struct EnHintnuts {
     /* 0x019A */ Vec3s jointTable[10];
     /* 0x01D6 */ Vec3s morphTable[10];
     /* 0x0214 */ ColliderCylinder collider;
-} EnHintnuts; // size = 0x0260
+    u64 sharedVersion;
+    bool sharedLeaving;
+} EnHintnuts;
 
 #endif

@@ -151,6 +151,9 @@ typedef struct BossGoma {
     /* 0x0758 */ u8 deadLimbsState[100]; // only 85/90 first indices actually used
     /* 0x07BC */ ColliderJntSph collider;
     /* 0x07DC */ ColliderJntSphElement colliderItems[13];
-} BossGoma; // size = 0x0B1C
+    u64 sharedSample;
+    s16 sharedHitGrace;
+    u16 childGenerations[3];
+} BossGoma;
 
 #endif

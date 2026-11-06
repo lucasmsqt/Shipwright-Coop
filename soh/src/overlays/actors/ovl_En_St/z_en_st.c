@@ -7,6 +7,7 @@
 #include "z_en_st.h"
 #include "objects/object_st/object_st.h"
 #include "soh/Enhancements/game-interactor/GameInteractor_Hooks.h"
+#include "soh/Network/Anchor/CombatSync.h"
 
 #define FLAGS                                                                                 \
     (ACTOR_FLAG_ATTENTION_ENABLED | ACTOR_FLAG_HOSTILE | ACTOR_FLAG_UPDATE_CULLING_DISABLED | \
@@ -18,6 +19,8 @@ void EnSt_Update(Actor* thisx, PlayState* play);
 void EnSt_Draw(Actor* thisx, PlayState* play);
 void EnSt_ReturnToCeiling(EnSt* this, PlayState* play);
 void EnSt_MoveToGround(EnSt* this, PlayState* play);
+void EnSt_WaitOnCeiling(EnSt* this, PlayState* play);
+void EnSt_LandOnGround(EnSt* this, PlayState* play);
 void EnSt_StartOnCeilingOrGround(EnSt* this, PlayState* play);
 void EnSt_WaitOnGround(EnSt* this, PlayState* play);
 void EnSt_Die(EnSt* this, PlayState* play);
@@ -406,6 +409,22 @@ s32 EnSt_CheckHitLink(EnSt* this, PlayState* play) {
     return true;
 }
 
+static void EnSt_StartSway(EnSt* this) {
+    this->invulnerableTimer = 8;
+    this->playSwayFlag = 0;
+    this->swayTimer = 60;
+}
+
+static bool EnSt_StartStun(EnSt* this) {
+    if (this->stunTimer != 0) {
+        return false;
+    }
+    Audio_PlayActorSound2(&this->actor, NA_SE_EN_GOMA_JR_FREEZE);
+    this->stunTimer = 120;
+    Actor_SetColorFilter(&this->actor, 0, 0xC8, 0, this->stunTimer);
+    return true;
+}
+
 s32 EnSt_CheckHitFrontside(EnSt* this) {
     u8 acFlags = this->colCylinder[2].base.acFlags;
 
@@ -414,51 +433,21 @@ s32 EnSt_CheckHitFrontside(EnSt* this) {
         return false;
     } else {
         this->colCylinder[2].base.acFlags &= ~AC_HIT;
-        this->invulnerableTimer = 8;
-        this->playSwayFlag = 0;
-        this->swayTimer = 60;
+        EnSt_StartSway(this);
+        GameInteractor_ExecuteOnEnemyDamage(&this->actor, 0, GI_ENEMY_HIT_SWAY);
         return true;
     }
 }
 
-s32 EnSt_CheckHitBackside(EnSt* this, PlayState* play) {
-    ColliderCylinder* cyl = &this->colCylinder[0];
-    s32 flags = 0; // ac hit flags from colliders 0 and 1
-    s32 hit = false;
-
-    if (cyl->base.acFlags & AC_HIT) {
-        cyl->base.acFlags &= ~AC_HIT;
-        hit = true;
-        flags |= cyl->info.acHitInfo->toucher.dmgFlags;
-    }
-
-    cyl = &this->colCylinder[1];
-    if (cyl->base.acFlags & AC_HIT) {
-        cyl->base.acFlags &= ~AC_HIT;
-        hit = true;
-        flags |= cyl->info.acHitInfo->toucher.dmgFlags;
-    }
-
-    if (!hit) {
-        return false;
-    }
-
+static s32 EnSt_ApplyBacksideDamage(EnSt* this, PlayState* play, s32 damage, bool arrow) {
     this->invulnerableTimer = 8;
-    if (this->actor.colChkInfo.damageEffect == 1) {
-        if (this->stunTimer == 0) {
-            Audio_PlayActorSound2(&this->actor, NA_SE_EN_GOMA_JR_FREEZE);
-            this->stunTimer = 120;
-            Actor_SetColorFilter(&this->actor, 0, 0xC8, 0, this->stunTimer);
-        }
-        return false;
-    }
-
     this->swayTimer = this->stunTimer = 0;
     this->gaveDamageSpinTimer = 1;
     Animation_ChangeByInfo(&this->skelAnime, sAnimationInfo, ENST_ANIM_3);
     this->takeDamageSpinTimer = this->skelAnime.animLength;
     Actor_SetColorFilter(&this->actor, 0x4000, 0xC8, 0, this->takeDamageSpinTimer);
-    if (Actor_ApplyDamage(&this->actor)) {
+    this->actor.colChkInfo.health = CLAMP_MIN(this->actor.colChkInfo.health - damage, 0);
+    if (this->actor.colChkInfo.health != 0) {
         Audio_PlayActorSound2(&this->actor, NA_SE_EN_STALTU_DAMAGE);
         return false;
     }
@@ -470,9 +459,7 @@ s32 EnSt_CheckHitBackside(EnSt* this, PlayState* play) {
     Audio_PlayActorSound2(&this->actor, NA_SE_EN_STALWALL_DEAD);
     GameInteractor_ExecuteOnEnemyDefeat(&this->actor);
 
-    if (flags & 0x1F820) {
-        // arrow, fire arrow, ice arrow, light arrow,
-        // and three unknows, unused arrows?
+    if (arrow) {
         EnSt_SetupAction(this, EnSt_Die);
         this->finishDeathTimer = 8;
     } else {
@@ -480,6 +467,37 @@ s32 EnSt_CheckHitBackside(EnSt* this, PlayState* play) {
     }
 
     return true;
+}
+
+s32 EnSt_CheckHitBackside(EnSt* this, PlayState* play) {
+    u32 flags = 0;
+    bool hit = false;
+    for (int i = 0; i < 2; ++i) {
+        ColliderCylinder* cylinder = &this->colCylinder[i];
+        if (cylinder->base.acFlags & AC_HIT) {
+            cylinder->base.acFlags &= ~AC_HIT;
+            flags |= cylinder->info.acHitInfo->toucher.dmgFlags;
+            hit = true;
+        }
+    }
+    if (!hit) {
+        return false;
+    }
+    if (this->actor.colChkInfo.damageEffect == 1) {
+        this->invulnerableTimer = 8;
+        if (EnSt_StartStun(this)) {
+            GameInteractor_ExecuteOnEnemyDamage(&this->actor, 0, GI_ENEMY_HIT_STUN);
+        }
+        return false;
+    }
+    bool arrow = (flags & 0x1F820) != 0;
+    s32 oldHealth = this->actor.colChkInfo.health;
+    s32 killed = EnSt_ApplyBacksideDamage(this, play, this->actor.colChkInfo.damage, arrow);
+    if (this->actor.colChkInfo.health < oldHealth) {
+        GameInteractor_ExecuteOnEnemyDamage(&this->actor, oldHealth - this->actor.colChkInfo.health,
+                                            arrow ? GI_ENEMY_HIT_SKULLTULA_ARROW : GI_ENEMY_HIT_NORMAL);
+    }
+    return killed;
 }
 
 /**
@@ -623,6 +641,9 @@ void EnSt_UpdateYaw(EnSt* this, PlayState* play) {
         // calculate the new yaw to or away from the player.
         rot = this->actor.shape.rot;
         yawTarget = (this->actionFunc == EnSt_WaitOnGround ? this->actor.yawTowardsPlayer : this->initalYaw);
+        if (this->actionFunc == EnSt_WaitOnGround && this->actor.xzDistToPlayer > 160.0f) {
+            Anchor_FindSkulltulaTarget(&this->actor, &yawTarget);
+        }
         yawDiff = rot.y - (yawTarget ^ yawDir);
         if (ABS(yawDiff) <= 0x4000) {
             Math_SmoothStepToS(&rot.y, yawTarget ^ yawDir, 4, 0x2000, 1);
@@ -696,19 +717,19 @@ s32 EnSt_IsCloseToPlayer(EnSt* this, PlayState* play) {
         return false;
     } else if (this->actor.xzDistToPlayer > 160.0f) {
         // player is more than 160 xz units from the Skulltula
-        return false;
+        return Anchor_FindSkulltulaTarget(&this->actor, NULL);
     }
 
     yDist = this->actor.world.pos.y - player->actor.world.pos.y;
     if (yDist < 0.0f || yDist > 400.0f) {
         // player is above the Skulltula or more than 400 units below
         // the Skulltula
-        return false;
+        return Anchor_FindSkulltulaTarget(&this->actor, NULL);
     }
 
     if (player->actor.world.pos.y < this->actor.floorHeight) {
         // player is below the Skulltula's ground position
-        return false;
+        return Anchor_FindSkulltulaTarget(&this->actor, NULL);
     }
     return true;
 }
@@ -1007,10 +1028,70 @@ void EnSt_StartOnCeilingOrGround(EnSt* this, PlayState* play) {
     }
 }
 
+static EnStActionFunc sSharedPhases[] = {
+    EnSt_WaitOnCeiling, EnSt_MoveToGround, EnSt_LandOnGround, EnSt_WaitOnGround, EnSt_ReturnToCeiling,
+};
+
+s32 EnSt_GetTeamPhase(const EnSt* this) {
+    for (s32 i = 0; i < ARRAY_COUNT(sSharedPhases); ++i) {
+        if (this->actionFunc == sSharedPhases[i]) {
+            return i;
+        }
+    }
+    return ENST_TEAM_PHASE_NONE;
+}
+
+static void EnSt_EnterSharedPhase(EnSt* this, s32 phase) {
+    if (phase == EnSt_GetTeamPhase(this)) {
+        return;
+    }
+    switch (phase) {
+        case ENST_TEAM_PHASE_DESCENDING:
+            EnSt_SetDropAnimAndVel(this);
+            break;
+        case ENST_TEAM_PHASE_LANDING: {
+            f32 y = this->actor.world.pos.y;
+            EnSt_SetLandAnimation(this);
+            this->actor.world.pos.y = y;
+            break;
+        }
+        case ENST_TEAM_PHASE_ASCENDING:
+            EnSt_SetReturnToCeilingAnimation(this);
+            break;
+        default:
+            EnSt_SetWaitingAnimation(this);
+            break;
+    }
+    EnSt_SetupAction(this, sSharedPhases[phase]);
+}
+
+static bool EnSt_ApplySharedHit(EnSt* this, PlayState* play) {
+    s32 reaction = GI_ENEMY_HIT_NORMAL;
+    s32 damage = GameInteractor_ConsumeSharedEnemyDamage(&this->actor, &reaction, NULL);
+    if (damage > 0) {
+        return EnSt_ApplyBacksideDamage(this, play, damage, reaction == GI_ENEMY_HIT_SKULLTULA_ARROW);
+    }
+    if (reaction == GI_ENEMY_HIT_SWAY) {
+        EnSt_StartSway(this);
+    } else if (reaction == GI_ENEMY_HIT_STUN) {
+        this->invulnerableTimer = 8;
+        EnSt_StartStun(this);
+    }
+    return false;
+}
+
 void EnSt_Update(Actor* thisx, PlayState* play) {
     EnSt* this = (EnSt*)thisx;
     s32 pad;
     Color_RGBA8 color = { 0, 0, 0, 0 };
+    s32 phase = Anchor_ApplySkulltulaPose(&this->actor);
+    bool following = phase != ENST_TEAM_PHASE_NONE;
+    if (following) {
+        EnSt_EnterSharedPhase(this, phase);
+    }
+    if (this->actor.colChkInfo.health != 0 && EnSt_ApplySharedHit(this, play)) {
+        return;
+    }
 
     if (this->actor.flags & ACTOR_FLAG_ATTACHED_TO_ARROW) {
         SkelAnime_Update(&this->skelAnime);
@@ -1021,13 +1102,16 @@ void EnSt_Update(Actor* thisx, PlayState* play) {
             SkelAnime_Update(&this->skelAnime);
         }
 
-        if (this->swayTimer == 0 && this->stunTimer == 0) {
+        if (!following && this->swayTimer == 0 && this->stunTimer == 0) {
             Actor_UpdatePos(&this->actor);
         }
 
         Actor_UpdateBgCheckInfo(play, &this->actor, 0.0f, 0.0f, 0.0f, 4);
 
-        if ((this->stunTimer == 0) && (this->swayTimer == 0)) {
+        if (following) {
+            DECR(this->stunTimer);
+            DECR(this->swayTimer);
+        } else if ((this->stunTimer == 0) && (this->swayTimer == 0)) {
             // run the current action if the Skulltula isn't stunned
             // or swaying.
             this->actionFunc(this, play);
@@ -1039,7 +1123,9 @@ void EnSt_Update(Actor* thisx, PlayState* play) {
             EnSt_Sway(this);
         }
 
-        EnSt_UpdateYaw(this, play);
+        if (!following) {
+            EnSt_UpdateYaw(this, play);
+        }
 
         if (this->actionFunc == EnSt_WaitOnGround) {
             if ((play->state.frames & 0x10) != 0) {

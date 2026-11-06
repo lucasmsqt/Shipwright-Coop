@@ -14,6 +14,7 @@ typedef struct ObjSyokudai {
     /* 0x01E6 */ u8 flameTexScroll;
     /* 0x01E8 */ LightNode* lightNode;
     /* 0x01EC */ LightInfo lightInfo;
+    u64 sharedTorchState;
 } ObjSyokudai; // size = 0x01FC
 
 #endif

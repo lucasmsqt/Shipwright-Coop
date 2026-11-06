@@ -159,16 +159,12 @@ void Message_UpdateOcarinaGame(PlayState* play) {
 }
 
 u8 Message_ShouldAdvance(PlayState* play) {
-    Input* input = &play->state.input[0];
-
-    bool isB_Held = CVarGetInteger(CVAR_ENHANCEMENT("SkipText"), 0) != 0 ? CHECK_BTN_ALL(input->cur.button, BTN_B)
-                                                                         : CHECK_BTN_ALL(input->press.button, BTN_B);
-
-    if (CHECK_BTN_ALL(input->press.button, BTN_A) || isB_Held || CHECK_BTN_ALL(input->press.button, BTN_CUP)) {
+    u8 advance = Message_ShouldAdvanceSilent(play);
+    if (advance) {
         Audio_PlaySfxGeneral(NA_SE_SY_MESSAGE_PASS, &gSfxDefaultPos, 4, &gSfxDefaultFreqAndVolScale,
                              &gSfxDefaultFreqAndVolScale, &gSfxDefaultReverb);
     }
-    return CHECK_BTN_ALL(input->press.button, BTN_A) || isB_Held || CHECK_BTN_ALL(input->press.button, BTN_CUP);
+    return advance;
 }
 
 u8 Message_ShouldAdvanceSilent(PlayState* play) {
@@ -177,7 +173,10 @@ u8 Message_ShouldAdvanceSilent(PlayState* play) {
     bool isB_Held = CVarGetInteger(CVAR_ENHANCEMENT("SkipText"), 0) != 0 ? CHECK_BTN_ALL(input->cur.button, BTN_B)
                                                                          : CHECK_BTN_ALL(input->press.button, BTN_B);
 
-    return CHECK_BTN_ALL(input->press.button, BTN_A) || isB_Held || CHECK_BTN_ALL(input->press.button, BTN_CUP);
+    return GameInteractor_Should(VB_ADVANCE_MESSAGE,
+                                 CHECK_BTN_ALL(input->press.button, BTN_A) || isB_Held ||
+                                     CHECK_BTN_ALL(input->press.button, BTN_CUP),
+                                 play);
 }
 
 /**
@@ -4560,8 +4559,8 @@ void Message_Update(PlayState* play) {
             }
             break;
         case MSGMODE_TEXT_DISPLAYING:
-            if (msgCtx->textBoxType != TEXTBOX_TYPE_NONE_BOTTOM && YREG(31) == 0 && isB_Held &&
-                !msgCtx->textUnskippable) {
+            if (msgCtx->textBoxType != TEXTBOX_TYPE_NONE_BOTTOM && YREG(31) == 0 &&
+                GameInteractor_Should(VB_SKIP_MESSAGE_TEXT, isB_Held && !msgCtx->textUnskippable, play)) {
                 sTextboxSkipped = true;
                 msgCtx->textDrawPos = msgCtx->decodedTextLen;
             }

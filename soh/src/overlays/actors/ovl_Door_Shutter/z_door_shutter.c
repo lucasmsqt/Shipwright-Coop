@@ -5,6 +5,7 @@
  */
 
 #include "z_door_shutter.h"
+#include "soh/Network/Anchor/RoomObjects.h"
 #include "overlays/actors/ovl_Boss_Goma/z_boss_goma.h"
 
 #include "objects/object_gnd/object_gnd.h"
@@ -442,21 +443,31 @@ void DoorShutter_InitOpeningDoorCam(DoorShutter* this, PlayState* play) {
     }
 }
 
-s32 DoorShutter_UpdateOpening(DoorShutter* this, PlayState* play) {
+s32 DoorShutter_UpdateOpening(DoorShutter* this, PlayState* play, bool camera) {
     if (this->gfxType != 3) {
+        f32* height = camera ? &this->dyna.actor.world.pos.y : &this->sharedDoorHeight;
+        f32 openHeight = camera ? this->dyna.actor.home.pos.y + 200.0f : 200.0f;
         if (this->dyna.actor.velocity.y == 0.0f) {
             Audio_PlayActorSound2(&this->dyna.actor, NA_SE_EV_SLIDE_DOOR_OPEN);
-            DoorShutter_InitOpeningDoorCam(this, play);
+            if (camera) {
+                DoorShutter_InitOpeningDoorCam(this, play);
+            }
         }
         Math_StepToF(&this->dyna.actor.velocity.y, 15.0f, 3.0f);
-        if (Math_StepToF(&this->dyna.actor.world.pos.y, this->dyna.actor.home.pos.y + 200.0f,
-                         this->dyna.actor.velocity.y)) {
+        if (Math_StepToF(height, openHeight, this->dyna.actor.velocity.y)) {
             return true;
         }
+    } else if (!camera) {
+        if (this->sharedDoorHeight == 0.0f) {
+            Audio_PlayActorSound2(&this->dyna.actor, NA_SE_EV_BUYODOOR_OPEN);
+        }
+        return Math_StepToF(&this->sharedDoorHeight, 200.0f, 20.0f);
     } else {
         if (this->jabuDoorClosedAmount == 100) {
             Audio_PlayActorSound2(&this->dyna.actor, NA_SE_EV_BUYODOOR_OPEN);
-            DoorShutter_InitOpeningDoorCam(this, play);
+            if (camera) {
+                DoorShutter_InitOpeningDoorCam(this, play);
+            }
         }
         if (Math_StepToS(&this->jabuDoorClosedAmount, 0, 10)) {
             return true;
@@ -512,7 +523,7 @@ void DoorShutter_UnbarredCheckSwitchFlag(DoorShutter* this, PlayState* play) {
 }
 
 void DoorShutter_Open(DoorShutter* this, PlayState* play) {
-    if (DECR(this->unlockTimer) == 0 && play->roomCtx.status == 0 && DoorShutter_UpdateOpening(this, play) != 0) {
+    if (DECR(this->unlockTimer) == 0 && play->roomCtx.status == 0 && DoorShutter_UpdateOpening(this, play, true) != 0) {
         if (((this->doorType == SHUTTER_BOSS) ? 20.0f : 50.0f) < this->dyna.actor.xzDistToPlayer) {
             if (DoorShutter_SetupDoor(this, play)) {
                 this->dyna.actor.velocity.y = 30.0f;
@@ -660,6 +671,34 @@ void DoorShutter_Update(Actor* thisx, PlayState* play) {
     DoorShutter* this = (DoorShutter*)thisx;
     Player* player = GET_PLAYER(play);
 
+    if (this->unk_164 == 0 && (this->actionFunc == DoorShutter_Idle ||
+        this->actionFunc == DoorShutter_UnbarredCheckSwitchFlag) &&
+        Anchor_ReadDoorOpening(thisx, 0, &this->sharedOpening) >= 0) {
+        this->sharedDoorTimer = -1;
+        this->sharedDoorHeight = 0.0f;
+        thisx->velocity.y = 0.0f;
+    }
+    if (this->sharedDoorTimer != 0 && this->unk_164 != 0) {
+        this->sharedDoorTimer = 0;
+        this->sharedDoorHeight = 0.0f;
+    }
+    if (this->sharedDoorTimer != 0) {
+        if (this->sharedDoorTimer == -1) {
+            if (DoorShutter_UpdateOpening(this, play, false)) {
+                this->sharedDoorTimer = 18;
+            }
+        } else if (this->sharedDoorTimer == -2) {
+            if (Math_StepToF(&this->sharedDoorHeight, 0.0f, 20.0f)) {
+                thisx->velocity.y = 0.0f;
+                this->sharedDoorTimer = 0;
+            }
+        } else if (--this->sharedDoorTimer == 0) {
+            this->sharedDoorTimer = -2;
+            Audio_PlayActorSound2(thisx, this->gfxType == 3 ? NA_SE_EV_BUYODOOR_CLOSE : NA_SE_EV_SLIDE_DOOR_CLOSE);
+        }
+        return;
+    }
+
     if (!(player->stateFlags1 &
           (PLAYER_STATE1_TALKING | PLAYER_STATE1_DEAD | PLAYER_STATE1_GETTING_ITEM | PLAYER_STATE1_IN_ITEM_CS)) ||
         (this->actionFunc == DoorShutter_SetupType)) {
@@ -667,10 +706,10 @@ void DoorShutter_Update(Actor* thisx, PlayState* play) {
     }
 }
 
-Gfx* func_80997838(PlayState* play, DoorShutter* this, Gfx* p) {
+Gfx* func_80997838(PlayState* play, DoorShutter* this, Gfx* p, s16 closedAmount) {
     MtxF mtx;
     f32 angle = 0.0f;
-    f32 yScale = this->jabuDoorClosedAmount * 0.01f;
+    f32 yScale = closedAmount * 0.01f;
     s32 i;
 
     Matrix_Get(&mtx);
@@ -683,7 +722,7 @@ Gfx* func_80997838(PlayState* play, DoorShutter* this, Gfx* p) {
         } else {
             Matrix_Translate(0.0f, 989.94f, 0.0f, MTXMODE_APPLY);
         }
-        if (this->jabuDoorClosedAmount != 100) {
+        if (closedAmount != 100) {
             Matrix_Scale(1.0f, yScale, 1.0f, MTXMODE_APPLY);
         }
         gSPMatrix(p++, MATRIX_NEWMTX(play->state.gfxCtx), G_MTX_NOPUSH | G_MTX_LOAD | G_MTX_MODELVIEW);
@@ -736,9 +775,11 @@ void DoorShutter_Draw(Actor* thisx, PlayState* play) {
         Gfx_SetupDL_25Opa(play->state.gfxCtx);
 
         if (this->gfxType == 3) {
-            POLY_OPA_DISP = func_80997838(play, this, POLY_OPA_DISP);
+            s16 closedAmount = this->sharedDoorTimer != 0 ? 100 - (s16)(this->sharedDoorHeight * 0.5f) :
+                               this->jabuDoorClosedAmount;
+            POLY_OPA_DISP = func_80997838(play, this, POLY_OPA_DISP, closedAmount);
             if (this->barsClosedAmount != 0.0f) {
-                f32 sp58 = (this->jabuDoorClosedAmount * 0.01f) * this->barsClosedAmount;
+                f32 sp58 = (closedAmount * 0.01f) * this->barsClosedAmount;
 
                 Gfx_SetupDL_25Opa(play->state.gfxCtx);
                 gDPSetEnvColor(POLY_OPA_DISP++, 0, 0, 0, 255.0f * sp58);
@@ -749,6 +790,9 @@ void DoorShutter_Draw(Actor* thisx, PlayState* play) {
                 gSPDisplayList(POLY_OPA_DISP++, sp70->b);
             }
         } else {
+            if (this->sharedDoorHeight != 0.0f && thisx->scale.y != 0.0f) {
+                Matrix_Translate(0.0f, this->sharedDoorHeight / thisx->scale.y, 0.0f, MTXMODE_APPLY);
+            }
             if (sp70->b != NULL) {
                 TransitionActorEntry* transitionEntry = &play->transiActorCtx.list[(u16)this->dyna.actor.params >> 0xA];
 

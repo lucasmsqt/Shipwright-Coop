@@ -5,6 +5,8 @@
  */
 
 #include "z_en_hintnuts.h"
+#include "soh/Network/Anchor/RoomObjects.h"
+#include "overlays/actors/ovl_En_Nutsball/z_en_nutsball.h"
 #include "objects/object_hintnuts/object_hintnuts.h"
 #include "soh/Enhancements/game-interactor/GameInteractor_Hooks.h"
 
@@ -288,8 +290,7 @@ void EnHintnuts_ThrowNut(EnHintnuts* this, PlayState* play) {
         nutPos.x = this->actor.world.pos.x + (Math_SinS(this->actor.shape.rot.y) * 23.0f);
         nutPos.y = this->actor.world.pos.y + 12.0f;
         nutPos.z = this->actor.world.pos.z + (Math_CosS(this->actor.shape.rot.y) * 23.0f);
-        if (Actor_Spawn(&play->actorCtx, play, ACTOR_EN_NUTSBALL, nutPos.x, nutPos.y, nutPos.z, this->actor.shape.rot.x,
-                        this->actor.shape.rot.y, this->actor.shape.rot.z, 1) != NULL) {
+        if (EnNutsball_SpawnFromScrub(play, &this->actor, &nutPos, 1) != NULL) {
             Audio_PlayActorSound2(&this->actor, NA_SE_EN_NUTS_THROW);
         }
     }
@@ -395,6 +396,7 @@ void EnHintnuts_Talk(EnHintnuts* this, PlayState* play) {
     Math_SmoothStepToS(&this->actor.shape.rot.y, this->actor.yawTowardsPlayer, 0x3, 0x400, 0x100);
     if (Message_GetState(&play->msgCtx) == TEXT_STATE_EVENT) {
         EnHintnuts_SetupLeave(this, play);
+        Anchor_SendRoomObject(&this->actor, ANCHOR_SCRUB_LEFT, sPuzzleCounter);
     }
 }
 
@@ -421,7 +423,9 @@ void EnHintnuts_Leave(EnHintnuts* this, PlayState* play) {
     Math_ScaledStepToS(&this->actor.shape.rot.y, temp_a1, 0x800);
     this->actor.world.rot.y = this->actor.shape.rot.y;
     if ((this->animFlagAndTimer == 0) || (this->actor.projectedPos.z < 0.0f)) {
-        Message_CloseTextbox(play);
+        if (!this->sharedLeaving || play->msgCtx.talkActor == &this->actor) {
+            Message_CloseTextbox(play);
+        }
         if (this->actor.params == 3) {
             Flags_SetClear(play, this->actor.room);
             sPuzzleCounter = 3;
@@ -468,13 +472,48 @@ void EnHintnuts_ColliderCheck(EnHintnuts* this, PlayState* play) {
         Actor_SetDropFlag(&this->actor, &this->collider.info, 1);
         if (this->collider.base.ac->id != ACTOR_EN_NUTSBALL) {
             EnHintnuts_SetupBurrow(this);
-        } else {
+        } else if (((EnNutsball*)this->collider.base.ac)->sharedOwner == 0 ||
+                   ((EnNutsball*)this->collider.base.ac)->sharedReflectedLocally) {
             EnHintnuts_HitByScrubProjectile1(this, play);
             EnHintnuts_HitByScrubProjectile2(this);
+            Anchor_SendRoomObject(&this->actor, ANCHOR_SCRUB_HIT, sPuzzleCounter);
         }
     } else if (play->actorCtx.unk_02 != 0) {
         EnHintnuts_HitByScrubProjectile1(this, play);
         EnHintnuts_HitByScrubProjectile2(this);
+    }
+}
+
+static void EnHintnuts_ApplyTeamState(EnHintnuts* this, PlayState* play) {
+    Vec3f position;
+    s32 counter;
+    s32 phase = Anchor_ReadRoomObject(&this->actor, &position, &counter, &this->sharedVersion);
+    if (phase == 0 || this->actionFunc == EnHintnuts_Leave) {
+        return;
+    }
+    this->actor.world.pos = position;
+    this->collider.base.acFlags &= ~AC_HIT;
+    if (phase == ANCHOR_SCRUB_LEFT) {
+        this->sharedLeaving = true;
+        this->actor.flags &= ~(ACTOR_FLAG_ATTENTION_ENABLED | ACTOR_FLAG_HOSTILE | ACTOR_FLAG_TALK_OFFER_AUTO_ACCEPTED);
+        this->collider.base.acFlags &= ~AC_ON;
+        if (this->actor.category == ACTORCAT_ENEMY) {
+            Actor_ChangeCategory(play, &play->actorCtx, &this->actor, ACTORCAT_BG);
+        }
+        if (this->actor.params == 3) {
+            sPuzzleCounter = 3;
+        }
+        EnHintnuts_SetupLeave(this, play);
+    } else if (this->actor.params == 0 || (this->actor.params == 3 && counter == 3)) {
+        if (this->actor.params == 3) {
+            sPuzzleCounter = 2;
+        }
+        EnHintnuts_HitByScrubProjectile1(this, play);
+        EnHintnuts_HitByScrubProjectile2(this);
+    } else {
+        s16 previous = sPuzzleCounter;
+        EnHintnuts_HitByScrubProjectile2(this);
+        sPuzzleCounter = previous == 3 ? previous : counter;
     }
 }
 
@@ -483,6 +522,10 @@ void EnHintnuts_Update(Actor* thisx, PlayState* play) {
     s32 pad;
 
     if (this->actor.params != 0xA) {
+        if (Anchor_ShouldUpdateSharedScrub(thisx)) {
+            thisx->flags |= ACTOR_FLAG_UPDATE_CULLING_DISABLED;
+        }
+        EnHintnuts_ApplyTeamState(this, play);
         EnHintnuts_ColliderCheck(this, play);
         this->actionFunc(this, play);
         if (this->actionFunc != EnHintnuts_Freeze && this->actionFunc != EnHintnuts_BeginFreeze) {

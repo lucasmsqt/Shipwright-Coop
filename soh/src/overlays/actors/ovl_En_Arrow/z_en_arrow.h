@@ -23,7 +23,11 @@ typedef struct EnArrow {
     /* 0x024C */ Actor* hitActor;
     /* 0x0250 */ Vec3f unk_250;
     /* 0x025C */ EnArrowActionFunc actionFunc;
-} EnArrow; // size = 0x0260
+    u32 anchorOwner;
+    u32 anchorShot;
+    bool fromLocalLink;
+    bool anchorReplica;
+} EnArrow;
 
 typedef enum {
     /* -10 */ ARROW_CS_NUT = -10, // cutscene deku nuts are allowed to update in blocking mode
@@ -40,5 +44,8 @@ typedef enum {
     /*  9  */ ARROW_SEED,
     /*  10 */ ARROW_NUT
 } ArrowType;
+
+void EnArrow_StartReplica(EnArrow* arrow, u32 owner, u32 shot);
+bool EnArrow_IsSharedType(s16 params);
 
 #endif

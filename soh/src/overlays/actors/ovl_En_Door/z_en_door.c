@@ -5,6 +5,7 @@
  */
 
 #include "z_en_door.h"
+#include "soh/Network/Anchor/RoomObjects.h"
 #include "objects/gameplay_keep/gameplay_keep.h"
 #include "objects/gameplay_field_keep/gameplay_field_keep.h"
 #include "objects/object_hidan_objects/object_hidan_objects.h"
@@ -194,6 +195,16 @@ void EnDoor_Idle(EnDoor* this, PlayState* play) {
     s32 doorType;
     Vec3f playerPosRelToDoor;
     s16 phi_v0;
+
+    if (this->playerIsOpening == 0) {
+        s32 shared = Anchor_ReadDoorOpening(&this->actor, this->unk_192, &this->sharedOpening);
+        if (shared >= 0) {
+            this->animStyle = shared & 3;
+            Animation_PlayOnceSetSpeed(&this->skelAnime, D_809FCECC[this->animStyle], shared >= 4 ? 0.75f : 1.5f);
+            this->actionFunc = EnDoor_Open;
+            return;
+        }
+    }
 
     doorType = this->actor.params >> 7 & 7;
     Actor_WorldToActorCoords(&this->actor, &playerPosRelToDoor, &player->actor.world.pos);

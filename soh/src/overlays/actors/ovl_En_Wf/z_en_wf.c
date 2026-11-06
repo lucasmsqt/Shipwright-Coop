@@ -1254,6 +1254,31 @@ void func_80B36F40(EnWf* this, PlayState* play) {
 }
 
 void EnWf_UpdateDamage(EnWf* this, PlayState* play) {
+    s32 oldHealth = this->actor.colChkInfo.health;
+    if (oldHealth > 0 && !(this->colliderCylinderBody.base.acFlags & AC_HIT) &&
+        !(this->colliderCylinderTail.base.acFlags & AC_HIT)) {
+        s32 reaction = GI_ENEMY_HIT_NORMAL;
+        s32 damage = GameInteractor_ConsumeSharedEnemyDamage(&this->actor, &reaction, NULL);
+        if (damage > 0 || reaction == GI_ENEMY_HIT_STUN || reaction == GI_ENEMY_HIT_DEFEAT) {
+            this->actor.colChkInfo.health = reaction == GI_ENEMY_HIT_DEFEAT ? 0 : CLAMP_MIN(oldHealth - damage, 0);
+            this->actor.colChkInfo.damageEffect = 0;
+            this->slashStatus = 0;
+            if (this->actor.colChkInfo.health == 0) {
+                EnWf_SetupDie(this);
+                Enemy_StartFinishingBlow(play, &this->actor);
+            } else if (reaction == GI_ENEMY_HIT_STUN) {
+                Actor_SetColorFilter(&this->actor, 0, 120, 0, 80);
+                EnWf_SetupStunned(this);
+            } else {
+                Actor_SetColorFilter(&this->actor, 0x4000, 255, 0, 8);
+                if (reaction == GI_ENEMY_HIT_FIRE) {
+                    this->fireTimer = 40;
+                }
+                EnWf_SetupDamaged(this);
+            }
+            return;
+        }
+    }
     if (this->colliderSpheres.base.acFlags & AC_BOUNCED) {
         this->colliderSpheres.base.acFlags &= ~(AC_HIT | AC_BOUNCED);
         this->colliderCylinderBody.base.acFlags &= ~AC_HIT;
@@ -1283,6 +1308,8 @@ void EnWf_UpdateDamage(EnWf* this, PlayState* play) {
                         Actor_SetColorFilter(&this->actor, 0, 120, 0, 80);
                         Actor_ApplyDamage(&this->actor);
                         EnWf_SetupStunned(this);
+                        GameInteractor_ExecuteOnEnemyDamage(&this->actor, oldHealth - this->actor.colChkInfo.health,
+                            this->actor.colChkInfo.health == 0 ? GI_ENEMY_HIT_DEFEAT : GI_ENEMY_HIT_STUN);
                     }
                 } else { // LIGHT_MAGIC, FIRE, NONE
                     Actor_SetColorFilter(&this->actor, 0x4000, 255, 0, 8);
@@ -1292,9 +1319,12 @@ void EnWf_UpdateDamage(EnWf* this, PlayState* play) {
                     }
 
                     if (Actor_ApplyDamage(&this->actor) == 0) {
+                        GameInteractor_ExecuteOnEnemyDamage(&this->actor, oldHealth, GI_ENEMY_HIT_DEFEAT);
                         EnWf_SetupDie(this);
                         Enemy_StartFinishingBlow(play, &this->actor);
                     } else {
+                        GameInteractor_ExecuteOnEnemyDamage(&this->actor, oldHealth - this->actor.colChkInfo.health,
+                            this->damageEffect == ENWF_DMGEFF_FIRE ? GI_ENEMY_HIT_FIRE : GI_ENEMY_HIT_NORMAL);
                         EnWf_SetupDamaged(this);
                     }
                 }

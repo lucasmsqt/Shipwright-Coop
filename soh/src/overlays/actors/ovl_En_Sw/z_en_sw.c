@@ -1,6 +1,7 @@
 #include "z_en_sw.h"
 #include "objects/object_st/object_st.h"
 #include "soh/Enhancements/game-interactor/GameInteractor_Hooks.h"
+#include "soh/Network/Anchor/CombatSync.h"
 #include <libultraship/bridge/consolevariablebridge.h>
 
 #define FLAGS (ACTOR_FLAG_ATTENTION_ENABLED | ACTOR_FLAG_HOSTILE | ACTOR_FLAG_UPDATE_CULLING_DISABLED)
@@ -326,11 +327,29 @@ s32 func_80B0C9F0(EnSw* this, PlayState* play) {
     }
 
     if (this->unk_392 == 0) {
-        if ((this->collider.base.acFlags & 2) || phi_v1) {
+        s32 oldHealth = this->actor.colChkInfo.health;
+        s32 gold = (this->actor.params & 0xE000) != 0;
+        s32 sharedDamage = 0;
+        if (oldHealth > 0 && !(this->collider.base.acFlags & AC_HIT)) {
+            sharedDamage = GameInteractor_ConsumeSharedEnemyDamage(&this->actor, NULL, NULL);
+        }
+        if ((this->collider.base.acFlags & AC_HIT) || phi_v1 || sharedDamage > 0) {
             this->collider.base.acFlags &= ~2;
             this->unk_392 = 0x10;
             Actor_SetColorFilter(&this->actor, 0x4000, 0xC8, 0, this->unk_392);
-            if (Actor_ApplyDamage(&this->actor) != 0) {
+            if (sharedDamage > 0) {
+                this->actor.colChkInfo.health = CLAMP_MIN(oldHealth - sharedDamage, 0);
+                if (gold) {
+                    Actor_SetScale(&this->actor, 0.02f);
+                }
+            } else {
+                Actor_ApplyDamage(&this->actor);
+                if (this->actor.colChkInfo.health < oldHealth) {
+                    GameInteractor_ExecuteOnEnemyDamage(&this->actor, oldHealth - this->actor.colChkInfo.health,
+                                                        GI_ENEMY_HIT_NORMAL);
+                }
+            }
+            if (this->actor.colChkInfo.health != 0) {
                 Audio_PlayActorSound2(&this->actor, NA_SE_EN_STALTU_DAMAGE);
                 return true;
             }
@@ -537,22 +556,37 @@ void func_80B0D3AC(EnSw* this, PlayState* play) {
     }
 }
 
+bool EnSw_IsOnGoldWall(const Actor* actor) {
+    return actor->id == ACTOR_EN_SW && (actor->params & 0xE000) != 0 &&
+           ((const EnSw*)actor)->actionFunc == func_80B0D590;
+}
+
+static void EnSw_UpdateNightCollider(EnSw* this) {
+    bool visible = this->actor.scale.x >= 0.0139999995f;
+    this->collider.elements[0].info.toucherFlags = visible;
+    this->collider.elements[0].info.bumperFlags = visible;
+    this->collider.elements[0].info.ocElemFlags = visible;
+}
+
 void func_80B0D590(EnSw* this, PlayState* play) {
     f32 sp2C;
 
+    if (Anchor_ApplyGoldSkulltulaPose(&this->actor)) {
+        MtxF surface;
+        Vec3s* rotation = &this->actor.world.rot;
+        SkinMatrix_SetTranslateRotateYXZScale(&surface, 1.0f, 1.0f, 1.0f, rotation->x, rotation->y, rotation->z,
+                                             0.0f, 0.0f, 0.0f);
+        this->unk_370 = (Vec3f){ surface.xx, surface.yx, surface.zx };
+        this->unk_364 = (Vec3f){ surface.xy, surface.yy, surface.zy };
+        this->unk_37C = (Vec3f){ surface.xz, surface.yz, surface.zz };
+        if (((this->actor.params & 0xE000) >> 0xD) == 2) {
+            EnSw_UpdateNightCollider(this);
+        }
+        return;
+    }
+
     if (((this->actor.params & 0xE000) >> 0xD) == 2) {
-        if (this->actor.scale.x < 0.0139999995f) {
-            this->collider.elements[0].info.toucherFlags = 0;
-            this->collider.elements[0].info.bumperFlags = 0;
-            this->collider.elements[0].info.ocElemFlags = 0;
-        }
-
-        if (this->actor.scale.x >= 0.0139999995f) {
-            this->collider.elements[0].info.toucherFlags = 1;
-            this->collider.elements[0].info.bumperFlags = 1;
-            this->collider.elements[0].info.ocElemFlags = 1;
-        }
-
+        EnSw_UpdateNightCollider(this);
         Math_ApproachF(&this->actor.scale.x,
                        !IS_DAY || CVarGetInteger(CVAR_ENHANCEMENT("NightGSAlwaysSpawn"), 0) ? 0.02f : 0.0f, 0.2f,
                        0.01f);

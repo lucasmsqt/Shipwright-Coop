@@ -38,6 +38,7 @@ void Anchor::SendPacket_PlayerUpdate() {
 
     payload["type"] = PLAYER_UPDATE;
     payload["sceneNum"] = gPlayState->sceneNum;
+    payload["curRoomNum"] = gPlayState->roomCtx.curRoom.num;
     payload["entranceIndex"] = gSaveContext.entranceIndex;
     payload["linkAge"] = gSaveContext.linkAge;
     payload["posRot"]["pos"] = player->actor.world.pos;
@@ -65,6 +66,9 @@ void Anchor::SendPacket_PlayerUpdate() {
     payload["invincibilityTimer"] = player->invincibilityTimer;
     payload["unk_862"] = player->unk_862;
     payload["unk_85C"] = player->unk_85C;
+    if (player->itemAction == PLAYER_IA_DEKU_STICK && player->unk_860 > 0) {
+        payload["stickBurnTimer"] = player->unk_860;
+    }
     payload["actionVar1"] = player->av1.actionVar1;
     payload["quiet"] = true;
 
@@ -76,8 +80,8 @@ void Anchor::SendPacket_PlayerUpdate() {
     }
 }
 
-void Anchor::HandlePacket_PlayerUpdate(nlohmann::json payload) {
-    uint32_t clientId = payload["clientId"].get<uint32_t>();
+void Anchor::HandlePacket_PlayerUpdate(const nlohmann::json& payload) {
+    uint32_t clientId = payload.at("clientId").get<uint32_t>();
 
     if (clients.contains(clientId)) {
         auto& client = clients[clientId];
@@ -87,6 +91,8 @@ void Anchor::HandlePacket_PlayerUpdate(nlohmann::json payload) {
         }
 
         client.sceneNum = payload.value("sceneNum", (s16)SCENE_ID_MAX);
+        client.curRoomNum = payload.value("curRoomNum", client.curRoomNum);
+        client.lastPlayerUpdate = std::chrono::steady_clock::now();
         client.entranceIndex = payload.value("entranceIndex", (s32)0);
         client.linkAge = payload.value("linkAge", (s32)LINK_AGE_ADULT);
         client.posRot = payload.value("posRot", PosRot{ 0 });
@@ -112,6 +118,7 @@ void Anchor::HandlePacket_PlayerUpdate(nlohmann::json payload) {
         client.invincibilityTimer = payload.value("invincibilityTimer", (s8)0);
         client.unk_862 = payload.value("unk_862", (s16)0);
         client.unk_85C = payload.value("unk_85C", (f32)0);
+        client.stickBurnTimer = payload.value("stickBurnTimer", (s16)0);
         client.actionVar1 = payload.value("actionVar1", (s8)0);
     }
 }

@@ -32,6 +32,10 @@ typedef struct EnRd {
     /* 0x031C */ u8 damageReaction;
     /* 0x031D */ u8 unk_31D;
     /* 0x0320 */ ColliderCylinder collider;
+    struct Player* anchorTarget;
+    u64 anchorSunPulse;
+    u8 anchorHitGrace;
+    bool anchorFollowing;
 } EnRd; // size = 0x036C
 
 #endif

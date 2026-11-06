@@ -5,6 +5,7 @@
  */
 
 #include "z_obj_kibako.h"
+#include "soh/Network/Anchor/RoomObjects.h"
 #include "objects/gameplay_dangeon_keep/gameplay_dangeon_keep.h"
 #include "overlays/effects/ovl_Effect_Ss_Kakera/z_eff_ss_kakera.h"
 #include "soh/Enhancements/game-interactor/GameInteractor_Hooks.h"
@@ -179,6 +180,20 @@ void ObjKibako_WaterBreak(ObjKibako* this, PlayState* play) {
     }
 }
 
+static void ObjKibako_Shatter(ObjKibako* this, PlayState* play, bool water, bool local) {
+    if (water) {
+        ObjKibako_WaterBreak(this, play);
+    } else {
+        ObjKibako_AirBreak(this, play);
+    }
+    SoundSource_PlaySfxAtFixedWorldPos(play, &this->actor.world.pos, 20, NA_SE_EV_WOODBOX_BREAK);
+    if (local) {
+        ObjKibako_SpawnCollectible(this, play);
+        Anchor_SendRoomObject(&this->actor, ANCHOR_OBJECT_BROKEN, water);
+    }
+    Actor_Kill(&this->actor);
+}
+
 void ObjKibako_SetupIdle(ObjKibako* this) {
     this->actionFunc = ObjKibako_Idle;
     this->actor.colChkInfo.mass = MASS_HEAVY;
@@ -190,15 +205,9 @@ void ObjKibako_Idle(ObjKibako* this, PlayState* play) {
     if (Actor_HasParent(&this->actor, play)) {
         ObjKibako_SetupHeld(this);
     } else if ((this->actor.bgCheckFlags & 0x20) && (this->actor.yDistToWater > 19.0f)) {
-        ObjKibako_WaterBreak(this, play);
-        SoundSource_PlaySfxAtFixedWorldPos(play, &this->actor.world.pos, 20, NA_SE_EV_WOODBOX_BREAK);
-        ObjKibako_SpawnCollectible(this, play);
-        Actor_Kill(&this->actor);
+        ObjKibako_Shatter(this, play, true, true);
     } else if (this->collider.base.acFlags & AC_HIT) {
-        ObjKibako_AirBreak(this, play);
-        SoundSource_PlaySfxAtFixedWorldPos(play, &this->actor.world.pos, 20, NA_SE_EV_WOODBOX_BREAK);
-        ObjKibako_SpawnCollectible(this, play);
-        Actor_Kill(&this->actor);
+        ObjKibako_Shatter(this, play, false, true);
     } else {
         Actor_MoveXZGravity(&this->actor);
         Actor_UpdateBgCheckInfo(play, &this->actor, 19.0f, 20.0f, 0.0f, 5);
@@ -252,15 +261,9 @@ void ObjKibako_Thrown(ObjKibako* this, PlayState* play) {
     s32 pad2;
 
     if ((this->actor.bgCheckFlags & 0xB) || (this->collider.base.atFlags & AT_HIT)) {
-        ObjKibako_AirBreak(this, play);
-        SoundSource_PlaySfxAtFixedWorldPos(play, &this->actor.world.pos, 20, NA_SE_EV_WOODBOX_BREAK);
-        ObjKibako_SpawnCollectible(this, play);
-        Actor_Kill(&this->actor);
+        ObjKibako_Shatter(this, play, false, true);
     } else if (this->actor.bgCheckFlags & 0x40) {
-        ObjKibako_WaterBreak(this, play);
-        SoundSource_PlaySfxAtFixedWorldPos(play, &this->actor.world.pos, 20, NA_SE_EV_WOODBOX_BREAK);
-        ObjKibako_SpawnCollectible(this, play);
-        Actor_Kill(&this->actor);
+        ObjKibako_Shatter(this, play, true, true);
     } else {
         ObjKibako_ApplyGravity(this);
         Actor_UpdatePos(&this->actor);
@@ -274,6 +277,11 @@ void ObjKibako_Thrown(ObjKibako* this, PlayState* play) {
 void ObjKibako_Update(Actor* thisx, PlayState* play) {
     s32 pad;
     ObjKibako* this = (ObjKibako*)thisx;
+    s32 broken = Anchor_ReadBreakable(thisx, &thisx->world.pos);
+    if (broken != 0) {
+        ObjKibako_Shatter(this, play, broken == 2, false);
+        return;
+    }
 
     this->actionFunc(this, play);
 }

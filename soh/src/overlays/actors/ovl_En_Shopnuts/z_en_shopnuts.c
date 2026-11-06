@@ -1,4 +1,5 @@
 #include "z_en_shopnuts.h"
+#include "overlays/actors/ovl_En_Nutsball/z_en_nutsball.h"
 #include "objects/object_shopnuts/object_shopnuts.h"
 #include "overlays/actors/ovl_En_Dns/z_en_dns.h"
 #include "soh/Enhancements/game-interactor/GameInteractor_Hooks.h"
@@ -204,8 +205,7 @@ void EnShopnuts_ThrowNut(EnShopnuts* this, PlayState* play) {
         spawnPos.x = this->actor.world.pos.x + (Math_SinS(this->actor.shape.rot.y) * 23.0f);
         spawnPos.y = this->actor.world.pos.y + 12.0f;
         spawnPos.z = this->actor.world.pos.z + (Math_CosS(this->actor.shape.rot.y) * 23.0f);
-        if (Actor_Spawn(&play->actorCtx, play, ACTOR_EN_NUTSBALL, spawnPos.x, spawnPos.y, spawnPos.z,
-                        this->actor.shape.rot.x, this->actor.shape.rot.y, this->actor.shape.rot.z, 2) != NULL) {
+        if (EnNutsball_SpawnFromScrub(play, &this->actor, &spawnPos, 2) != NULL) {
             Audio_PlayActorSound2(&this->actor, NA_SE_EN_NUTS_THROW);
         }
     }

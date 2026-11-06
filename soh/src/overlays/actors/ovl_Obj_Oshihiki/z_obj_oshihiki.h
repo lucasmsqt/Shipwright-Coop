@@ -49,6 +49,11 @@ typedef struct ObjOshihiki {
     /* 0x01C8 */ f32 underDistZ;
     /* 0x01CC */ void* texture;
     /* 0x01D0 */ Color_RGB8 color;
-} ObjOshihiki; // size = 0x01D4
+    u64 sharedVersion;
+    Vec3f sharedPosition;
+    u32 sharedUpdateFrame;
+    s32 sharedPhase;
+    bool sentMovement;
+} ObjOshihiki;
 
 #endif

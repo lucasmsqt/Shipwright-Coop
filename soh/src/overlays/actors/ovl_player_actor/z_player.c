@@ -30,6 +30,7 @@
 #include "soh/frame_interpolation.h"
 #include "soh/OTRGlobals.h"
 #include "soh/Enhancements/savestate_serialize.h"
+#include "soh/Network/Anchor/RoomObjects.h"
 
 #include <string.h>
 #include <stdlib.h>
@@ -5464,6 +5465,13 @@ s32 Player_ActionHandler_1(Player* this, PlayState* play) {
             }
 
             if ((this->doorType != PLAYER_DOORTYPE_FAKE) && (doorActor->category == ACTORCAT_DOOR)) {
+                if (doorActor->id == ACTOR_EN_DOOR) {
+                    EnDoor* enDoor = (EnDoor*)doorActor;
+                    Anchor_SendDoorOpening(doorActor, enDoor->unk_192,
+                                           enDoor->animStyle + ((this->stateFlags1 & PLAYER_STATE1_IN_WATER) ? 4 : 0));
+                } else if (doorActor->id == ACTOR_DOOR_SHUTTER) {
+                    Anchor_SendDoorOpening(doorActor, 0, 0);
+                }
                 frontRoom = play->transiActorCtx.list[GET_TRANSITION_ACTOR_INDEX(doorActor)]
                                 .sides[(doorDirection > 0) ? 0 : 1]
                                 .room;
@@ -11553,6 +11561,11 @@ static Vec3f D_808547B0 = { 0.0f, 0.5f, 0.0f };
 static Color_RGBA8 D_808547BC = { 255, 255, 100, 255 };
 static Color_RGBA8 D_808547C0 = { 255, 50, 0, 0 };
 
+void Player_SpawnDekuStickFlame(PlayState* play, Player* player, f32 scale) {
+    func_8002836C(play, &player->meleeWeaponInfo[0].tip, &D_808547A4, &D_808547B0, &D_808547BC, &D_808547C0,
+                  scale * 200.0f, 0, 8);
+}
+
 void Player_UpdateBurningDekuStick(PlayState* play, Player* this) {
     f32 temp;
 
@@ -11575,8 +11588,7 @@ void Player_UpdateBurningDekuStick(PlayState* play, Player* this) {
         this->unk_85C = temp;
     }
 
-    func_8002836C(play, &this->meleeWeaponInfo[0].tip, &D_808547A4, &D_808547B0, &D_808547BC, &D_808547C0,
-                  temp * 200.0f, 0, 8);
+    Player_SpawnDekuStickFlame(play, this, temp);
 }
 
 void Player_UpdateBodyShock(PlayState* play, Player* this) {

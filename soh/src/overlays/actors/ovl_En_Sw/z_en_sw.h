@@ -49,4 +49,6 @@ typedef struct EnSw {
     /* 0x0490 */ char unk_490[0x48];
 } EnSw; // size = 0x04D8
 
+bool EnSw_IsOnGoldWall(const Actor* actor);
+
 #endif

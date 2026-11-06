@@ -13,7 +13,9 @@ void EnDekubaba_Draw(Actor* thisx, PlayState* play);
 void EnDekuBaba_Reset(void);
 
 void EnDekubaba_SetupWait(EnDekubaba* this);
-void EnDekubaba_SetupGrow(EnDekubaba* this);
+void EnDekubaba_SetupGrow(EnDekubaba* this, bool alreadyEmerged);
+void EnDekubaba_SetupDecideLunge(EnDekubaba* this);
+void EnDekubaba_UpdateHeadPosition(EnDekubaba* this);
 void EnDekubaba_Wait(EnDekubaba* this, PlayState* play);
 void EnDekubaba_Grow(EnDekubaba* this, PlayState* play);
 void EnDekubaba_Retract(EnDekubaba* this, PlayState* play);
@@ -316,7 +318,7 @@ void EnDekubaba_SetupWait(EnDekubaba* this) {
     this->actionFunc = EnDekubaba_Wait;
 }
 
-void EnDekubaba_SetupGrow(EnDekubaba* this) {
+void EnDekubaba_SetupGrow(EnDekubaba* this, bool alreadyEmerged) {
     s32 i;
 
     Animation_Change(&this->skelAnime, &gDekuBabaFastChompAnim,
@@ -331,8 +333,18 @@ void EnDekubaba_SetupGrow(EnDekubaba* this) {
 
     this->collider.base.colType = COLTYPE_HIT6;
     this->collider.base.acFlags &= ~AC_HARD;
-    Audio_PlayActorSound2(&this->actor, NA_SE_EN_DUMMY482);
-    this->actionFunc = EnDekubaba_Grow;
+    if (alreadyEmerged) {
+        Actor_SetScale(&this->actor, this->size * 0.01f);
+        this->actor.shape.rot.x = 0x1800;
+        this->stemSectionAngle[0] = -0xAAA;
+        this->stemSectionAngle[1] = -0x31C7;
+        this->stemSectionAngle[2] = -0x5555;
+        EnDekubaba_UpdateHeadPosition(this);
+        EnDekubaba_SetupDecideLunge(this);
+    } else {
+        Audio_PlayActorSound2(&this->actor, NA_SE_EN_DUMMY482);
+        this->actionFunc = EnDekubaba_Grow;
+    }
 }
 
 void EnDekubaba_SetupRetract(EnDekubaba* this) {
@@ -470,6 +482,7 @@ void EnDekubaba_SetupDeadStickDrop(EnDekubaba* this, PlayState* play) {
 // Action functions
 
 void EnDekubaba_Wait(EnDekubaba* this, PlayState* play) {
+    bool alreadyEmerged = false;
     if (this->timer != 0) {
         this->timer--;
     }
@@ -478,9 +491,11 @@ void EnDekubaba_Wait(EnDekubaba* this, PlayState* play) {
     this->actor.world.pos.z = this->actor.home.pos.z;
     this->actor.world.pos.y = this->actor.home.pos.y + 14.0f * this->size;
 
-    if ((this->timer == 0) && (this->actor.xzDistToPlayer < 200.0f * this->size) &&
-        (fabsf(this->actor.yDistToPlayer) < 30.0f * this->size)) {
-        EnDekubaba_SetupGrow(this);
+    if (GameInteractor_Should(VB_BABA_SHARED_EMERGENCE,
+                              this->timer == 0 && this->actor.xzDistToPlayer < 200.0f * this->size &&
+                                  fabsf(this->actor.yDistToPlayer) < 30.0f * this->size,
+                              &this->actor, &alreadyEmerged)) {
+        EnDekubaba_SetupGrow(this, alreadyEmerged);
     }
 }
 
@@ -544,7 +559,9 @@ void EnDekubaba_Grow(EnDekubaba* this, PlayState* play) {
                              1, HAHEN_OBJECT_DEFAULT, 10, NULL);
 
     if (this->timer == 0) {
-        if (Math_Vec3f_DistXZ(&this->actor.home.pos, &player->actor.world.pos) < 240.0f * this->size) {
+        if (GameInteractor_Should(VB_BABA_STAY_EMERGED,
+                                  Math_Vec3f_DistXZ(&this->actor.home.pos, &player->actor.world.pos) < 240.0f * this->size,
+                                  &this->actor)) {
             EnDekubaba_SetupPrepareLunge(this);
         } else {
             EnDekubaba_SetupRetract(this);
@@ -663,7 +680,9 @@ void EnDekubaba_DecideLunge(EnDekubaba* this, PlayState* play) {
 
     EnDekubaba_UpdateHeadPosition(this);
 
-    if (240.0f * this->size < Math_Vec3f_DistXZ(&this->actor.home.pos, &player->actor.world.pos)) {
+    if (!GameInteractor_Should(VB_BABA_STAY_EMERGED,
+                               Math_Vec3f_DistXZ(&this->actor.home.pos, &player->actor.world.pos) <= 240.0f * this->size,
+                               &this->actor)) {
         EnDekubaba_SetupRetract(this);
     } else if ((this->timer == 0) || (this->actor.xzDistToPlayer < 80.0f * this->size)) {
         EnDekubaba_SetupPrepareLunge(this);
@@ -1036,8 +1055,30 @@ void EnDekubaba_UpdateDamage(EnDekubaba* this, PlayState* play) {
     Vec3f* firePos;
     f32 fireScale;
     s32 phi_s0; // Used for both health and iterator
+    s32 oldHealth = this->actor.colChkInfo.health;
+    s32 sharedDamage = 0;
+    s32 reaction = GI_ENEMY_HIT_NORMAL;
+    s32 sharedHit;
 
-    if (this->collider.base.acFlags & AC_HIT) {
+    if (oldHealth != 0 && !(this->collider.base.acFlags & AC_HIT)) {
+        sharedDamage = GameInteractor_ConsumeSharedEnemyDamage(&this->actor, &reaction, NULL);
+    }
+
+    sharedHit = sharedDamage > 0 || reaction != GI_ENEMY_HIT_NORMAL;
+    if (sharedHit) {
+        if (this->actionFunc == EnDekubaba_Wait || this->actionFunc == EnDekubaba_Retract) {
+            EnDekubaba_SetupGrow(this, true);
+        }
+        this->actor.colChkInfo.health = CLAMP_MIN(oldHealth - sharedDamage, 0);
+        this->actor.dropFlag = 0;
+        if (this->actor.colChkInfo.health == 0 && reaction == GI_ENEMY_HIT_PRUNED) {
+            EnDekubaba_SetupPrunedSomersault(this);
+        } else if (this->actor.colChkInfo.health != 0 && reaction == GI_ENEMY_HIT_SWAY) {
+            EnDekubaba_SetupSway(this);
+        } else {
+            EnDekubaba_SetupHit(this, reaction == GI_ENEMY_HIT_STUN ? 2 : reaction == GI_ENEMY_HIT_RECOIL);
+        }
+    } else if (this->collider.base.acFlags & AC_HIT) {
         this->collider.base.acFlags &= ~AC_HIT;
         Actor_SetDropFlagJntSph(&this->actor, &this->collider, 1);
 
@@ -1054,12 +1095,14 @@ void EnDekubaba_UpdateDamage(EnDekubaba* this, PlayState* play) {
                     }
 
                     EnDekubaba_SetupHit(this, 2);
+                    reaction = GI_ENEMY_HIT_STUN;
                 } else if (this->actionFunc == EnDekubaba_PullBack) {
                     if (phi_s0 <= 0) {
                         phi_s0 = 1;
                     }
 
                     EnDekubaba_SetupHit(this, 1);
+                    reaction = GI_ENEMY_HIT_RECOIL;
                 } else {
                     EnDekubaba_SetupHit(this, 0);
                 }
@@ -1067,8 +1110,10 @@ void EnDekubaba_UpdateDamage(EnDekubaba* this, PlayState* play) {
                        (this->actor.colChkInfo.damageEffect == DEKUBABA_DMGEFF_SWORD)) {
                 if (phi_s0 > 0) {
                     EnDekubaba_SetupSway(this);
+                    reaction = GI_ENEMY_HIT_SWAY;
                 } else {
                     EnDekubaba_SetupPrunedSomersault(this);
+                    reaction = GI_ENEMY_HIT_PRUNED;
                 }
             } else if (this->actor.colChkInfo.damageEffect != DEKUBABA_DMGEFF_DEKUNUT) {
                 EnDekubaba_SetupHit(this, 0);
@@ -1097,6 +1142,11 @@ void EnDekubaba_UpdateDamage(EnDekubaba* this, PlayState* play) {
         EnDekubaba_SetupHit(this, 1);
     } else {
         return;
+    }
+
+    if (!sharedHit &&
+        (this->actor.colChkInfo.health < oldHealth || reaction != GI_ENEMY_HIT_NORMAL)) {
+        GameInteractor_ExecuteOnEnemyDamage(&this->actor, oldHealth - this->actor.colChkInfo.health, reaction);
     }
 
     if (this->actor.colChkInfo.health != 0) {

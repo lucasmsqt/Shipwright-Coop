@@ -98,15 +98,89 @@ void Anchor::RegisterHooks() {
         SendPacket_PlayerUpdate();
     });
 
-    COND_HOOK(OnGameFrameUpdate, isConnected, [&]() { ProcessIncomingPacketQueue(); });
+    COND_HOOK(OnGameFrameUpdate, true, [&]() {
+        if (isConnected) {
+            ProcessIncomingPacketQueue();
+            FollowPendingTeamCutscene();
+            UpdateWorldState();
+            ApplyTreeSkulltulas();
+        } else {
+            ResetTeamCutscene();
+            ResetWorldState();
+        }
+    });
 
+    COND_HOOK(OnScriptedCutsceneStart, isConnected, [&]() { OnScriptedCutsceneStart(); });
+    COND_VB_SHOULD(VB_ADVANCE_MESSAGE, isConnected, {
+        Anchor::Instance->HandleTeamCutsceneInput(va_arg(args, PlayState*), false, should);
+    });
+    COND_VB_SHOULD(VB_SKIP_MESSAGE_TEXT, isConnected, {
+        Anchor::Instance->HandleTeamCutsceneInput(va_arg(args, PlayState*), true, should);
+    });
+    COND_HOOK(OnEnemyDamage, isConnected,
+              [&](Actor* actor, int32_t damage, int32_t reaction) { SendPacket_EnemyDamage(actor, damage, reaction); });
+    COND_HOOK(OnConsumeSharedEnemyDamage, isConnected,
+              [&](Actor* actor, int32_t* damage, int32_t* reaction, PosRot* pose) {
+                  ConsumeSharedEnemyDamage(actor, damage, reaction, pose);
+              });
+    COND_VB_SHOULD(VB_BABA_SHARED_EMERGENCE, isConnected, {
+        Actor* actor = va_arg(args, Actor*);
+        bool* alreadyEmerged = va_arg(args, bool*);
+        Anchor::Instance->UpdateBabaEmergence(actor, should, alreadyEmerged);
+    });
+    COND_VB_SHOULD(VB_BABA_STAY_EMERGED, isConnected, {
+        Actor* actor = va_arg(args, Actor*);
+        if (!*should) {
+            *should = Anchor::Instance->ShouldKeepBabaEmerged(actor);
+        }
+    });
+    COND_ID_HOOK(OnActorInit, ACTOR_EN_DEKUBABA, isConnected, [&](void* actor) {
+        if (CanShareCombat()) {
+            static_cast<Actor*>(actor)->flags |= ACTOR_FLAG_UPDATE_CULLING_DISABLED;
+        }
+    });
+    COND_ID_HOOK(OnActorInit, ACTOR_EN_KAREBABA, isConnected, [&](void* actor) {
+        if (CanShareCombat()) {
+            static_cast<Actor*>(actor)->flags |= ACTOR_FLAG_UPDATE_CULLING_DISABLED;
+        }
+    });
+    COND_ID_HOOK(OnActorInit, ACTOR_EN_HINTNUTS, isConnected, [&](void* actor) {
+        auto* scrub = static_cast<Actor*>(actor);
+        if (ShouldUpdateSharedScrub(scrub)) {
+            scrub->flags |= ACTOR_FLAG_UPDATE_CULLING_DISABLED;
+        }
+    });
+    COND_HOOK(OnPlayDrawBegin, isConnected, [&]() {
+        ApplyTeamNpcPositions();
+        ApplyTeamNpcGaze();
+    });
+    COND_HOOK(ShouldActorUpdate, isConnected, [&](void* actor, bool* should) {
+        if (*should && enemyPoseAuthority != 0 && enemyPoseAuthority != ownClientId) {
+            ApplyEnemyPose(static_cast<Actor*>(actor), false);
+        }
+    });
     COND_VB_SHOULD(VB_KEEP_WORLD_RUNNING_WHILE_PAUSED, isConnected, { *should = Anchor::Instance->IsSaveLoaded(); });
 
     COND_HOOK(OnPlayerSfx, isConnected, [&](u16 sfxId) { SendPacket_PlayerSfx(sfxId); });
     COND_HOOK(OnOcarinaNote, isConnected,
               [&](uint8_t note, float modulator, int8_t bend) { SendPacket_OcarinaSfx(note, modulator, bend); });
 
-    COND_HOOK(OnLoadGame, isConnected, [&](s16 fileNum) { justLoadedSave = true; });
+    COND_HOOK(OnLoadGame, true, [&](int32_t fileNum) {
+        justLoadedSave = isConnected;
+        playedTeamCutscenes = 0;
+        ResetTeamCutscene();
+        ResetWorldState();
+    });
+    COND_HOOK(OnPlayDestroy, isConnected, [&]() {
+        localWorldPeer.scene = SCENE_ID_MAX;
+        roomObjectArea = NpcArea(SCENE_ID_MAX, -1, -1, false);
+        roomObjects.clear();
+        spawnedTreeSkulltulas.clear();
+        treeSkulltulasDirty = false;
+        dynamicReplicasActive = false;
+        gallerySpectating = false;
+        ResetCombatRoom();
+    });
 
     COND_HOOK(OnSaveFile, isConnected, [&](s16 fileNum, int sectionID) {
         if (sectionID == 0) {

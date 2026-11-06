@@ -58,6 +58,7 @@ typedef struct EnDoor {
     // #region SOH [Randomizer]
     /*        */ RandomizerInf randomizerInf;
     // #endregion
+    u64 sharedOpening;
 } EnDoor; // size = 0x01D8
 
 #ifdef __cplusplus

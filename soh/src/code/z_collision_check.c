@@ -1,7 +1,9 @@
 #include "global.h"
 #include "vt.h"
 #include "overlays/effects/ovl_Effect_Ss_HitMark/z_eff_ss_hitmark.h"
+#include "overlays/actors/ovl_En_Nutsball/z_en_nutsball.h"
 #include "soh/Enhancements/game-interactor/GameInteractor.h"
+#include "soh/Network/Anchor/CombatSync.h"
 #include <assert.h>
 #include <libultraship/bridge/consolevariablebridge.h>
 
@@ -1724,6 +1726,12 @@ void CollisionCheck_SetBounce(Collider* at, Collider* ac) {
  */
 s32 CollisionCheck_SetATvsAC(PlayState* play, Collider* at, ColliderInfo* atInfo, Vec3f* atPos, Collider* ac,
                              ColliderInfo* acInfo, Vec3f* acPos, Vec3f* hitPos) {
+    if (at->actor != NULL && at->actor->id == ACTOR_EN_NUTSBALL && (at->atFlags & AT_TYPE_ENEMY) &&
+        !(ac->acFlags & AC_HARD) && ac->actor != NULL && ac->actor == (Actor*)GET_PLAYER(play) &&
+        !EnNutsball_AllowPlayerContact((EnNutsball*)at->actor, play)) {
+        return false;
+    }
+
     if (ac->acFlags & AC_HARD && at->actor != NULL && ac->actor != NULL) {
         CollisionCheck_SetBounce(at, ac);
     }
@@ -3031,6 +3039,11 @@ void CollisionCheck_ApplyDamage(PlayState* play, CollisionCheckContext* colChkCt
     if (CVarGetInteger(CVAR_ENHANCEMENT("IvanCoopModeEnabled"), 0)) {
         collider->actor->colChkInfo.damage *= GET_PLAYER(play)->ivanDamageMultiplier;
     }
+
+    if (info->acHit != NULL && info->acHit->actor != NULL &&
+        (info->acHit->actor == (Actor*)GET_PLAYER(play) || info->acHit->actor->id == ACTOR_EN_ARROW)) {
+        Anchor_SendEnemyHit(play, collider, info);
+    }
 }
 
 /**
@@ -3088,6 +3101,8 @@ static ColChkApplyFunc sApplyDamageFuncs[4] = {
  */
 void CollisionCheck_Damage(PlayState* play, CollisionCheckContext* colChkCtx) {
     s32 i;
+
+    Anchor_ApplyEnemyHits(play, colChkCtx);
 
     for (i = 0; i < colChkCtx->colACCount; i++) {
         Collider* collider = colChkCtx->colAC[i];

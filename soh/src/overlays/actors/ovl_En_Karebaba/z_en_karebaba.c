@@ -184,6 +184,17 @@ void EnKarebaba_SetupDying(EnKarebaba* this) {
     GameInteractor_ExecuteOnEnemyDefeat(&this->actor);
 }
 
+static void EnKarebaba_Defeat(EnKarebaba* this, PlayState* play, bool localHit) {
+    this->actor.colChkInfo.health = 0;
+    this->bodyCollider.base.acFlags &= ~AC_HIT;
+    EnKarebaba_SetupDying(this);
+    Enemy_StartFinishingBlow(play, &this->actor);
+    if (localHit) {
+        // This plant regrows, so a defeat must not accumulate as damage across its lives.
+        GameInteractor_ExecuteOnEnemyDamage(&this->actor, 0, GI_ENEMY_HIT_KAREBABA_KILLED);
+    }
+}
+
 void EnKarebaba_SetupDeadItemDrop(EnKarebaba* this, PlayState* play) {
     Actor_SetScale(&this->actor, 0.03f);
     this->actor.shape.rot.x -= 0x4000;
@@ -223,9 +234,27 @@ void EnKarebaba_SetupRegrow(EnKarebaba* this) {
     this->actionFunc = EnKarebaba_Regrow;
 }
 
+static bool EnKarebaba_TryEmerge(EnKarebaba* this, bool localTrigger) {
+    bool alreadyEmerged = false;
+    if (!GameInteractor_Should(VB_BABA_SHARED_EMERGENCE, localTrigger, &this->actor, &alreadyEmerged)) {
+        return false;
+    }
+    if (alreadyEmerged) {
+        Animation_PlayLoopSetSpeed(&this->skelAnime, &gDekuBabaFastChompAnim, 4.0f);
+        this->actor.world.pos.y = this->actor.home.pos.y + 60.0f;
+        EnKarebaba_SetupUpright(this);
+    } else {
+        EnKarebaba_SetupAwaken(this);
+    }
+    return true;
+}
+
 void EnKarebaba_Grow(EnKarebaba* this, PlayState* play) {
     f32 scale;
 
+    if (EnKarebaba_TryEmerge(this, false)) {
+        return;
+    }
     this->actor.params++;
     scale = this->actor.params * 0.05f;
     Actor_SetScale(&this->actor, 0.005f * scale);
@@ -236,9 +265,7 @@ void EnKarebaba_Grow(EnKarebaba* this, PlayState* play) {
 }
 
 void EnKarebaba_Idle(EnKarebaba* this, PlayState* play) {
-    if (this->actor.xzDistToPlayer < 200.0f && fabsf(this->actor.yDistToPlayer) < 30.0f) {
-        EnKarebaba_SetupAwaken(this);
-    }
+    EnKarebaba_TryEmerge(this, this->actor.xzDistToPlayer < 200.0f && fabsf(this->actor.yDistToPlayer) < 30.0f);
 }
 
 void EnKarebaba_Awaken(EnKarebaba* this, PlayState* play) {
@@ -266,9 +293,10 @@ void EnKarebaba_Upright(EnKarebaba* this, PlayState* play) {
     }
 
     if (this->bodyCollider.base.acFlags & AC_HIT) {
-        EnKarebaba_SetupDying(this);
-        Enemy_StartFinishingBlow(play, &this->actor);
-    } else if (Math_Vec3f_DistXZ(&this->actor.home.pos, &player->actor.world.pos) > 240.0f) {
+        EnKarebaba_Defeat(this, play, true);
+    } else if (!GameInteractor_Should(
+                   VB_BABA_STAY_EMERGED,
+                   Math_Vec3f_DistXZ(&this->actor.home.pos, &player->actor.world.pos) <= 240.0f, &this->actor)) {
         EnKarebaba_SetupRetract(this);
     } else if (this->actor.params == 0) {
         EnKarebaba_SetupSpin(this);
@@ -308,8 +336,7 @@ void EnKarebaba_Spin(EnKarebaba* this, PlayState* play) {
     this->actor.world.pos.z = (Math_CosS(this->actor.shape.rot.y) * cos60) + this->actor.home.pos.z;
 
     if (this->bodyCollider.base.acFlags & AC_HIT) {
-        EnKarebaba_SetupDying(this);
-        Enemy_StartFinishingBlow(play, &this->actor);
+        EnKarebaba_Defeat(this, play, true);
     } else if (this->actor.params == 0) {
         EnKarebaba_SetupUpright(this);
     }
@@ -402,7 +429,10 @@ void EnKarebaba_Regrow(EnKarebaba* this, PlayState* play) {
     this->actor.world.pos.y = this->actor.home.pos.y + (14.0f * scaleFactor);
 
     if (this->actor.params == 20) {
-        this->actor.flags &= ~ACTOR_FLAG_UPDATE_CULLING_DISABLED;
+        if (!GameInteractor_Should(VB_BABA_STAY_EMERGED, false, &this->actor)) {
+            this->actor.flags &= ~ACTOR_FLAG_UPDATE_CULLING_DISABLED;
+        }
+        this->actor.colChkInfo.health = sColCheckInfoInit.health;
         this->actor.flags |= ACTOR_FLAG_ATTENTION_ENABLED | ACTOR_FLAG_HOSTILE;
         Actor_ChangeCategory(play, &play->actorCtx, &this->actor, ACTORCAT_ENEMY);
         EnKarebaba_SetupIdle(this);
@@ -413,6 +443,16 @@ void EnKarebaba_Update(Actor* thisx, PlayState* play) {
     s32 pad;
     EnKarebaba* this = (EnKarebaba*)thisx;
     f32 height;
+    s32 reaction = GI_ENEMY_HIT_NORMAL;
+
+    GameInteractor_ConsumeSharedEnemyDamage(&this->actor, &reaction, NULL);
+    if (reaction == GI_ENEMY_HIT_KAREBABA_KILLED && this->actor.colChkInfo.health != 0) {
+        if (this->actionFunc != EnKarebaba_Upright && this->actionFunc != EnKarebaba_Spin) {
+            this->actor.world.pos.y = this->actor.home.pos.y + 60.0f;
+            EnKarebaba_SetupUpright(this);
+        }
+        EnKarebaba_Defeat(this, play, false);
+    }
 
     this->actionFunc(this, play);
 

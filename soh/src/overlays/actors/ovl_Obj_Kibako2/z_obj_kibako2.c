@@ -5,6 +5,7 @@
  */
 
 #include "z_obj_kibako2.h"
+#include "soh/Network/Anchor/RoomObjects.h"
 #include "objects/object_kibako2/object_kibako2.h"
 #include "overlays/effects/ovl_Effect_Ss_Kakera/z_eff_ss_kakera.h"
 #include "soh/Enhancements/game-interactor/GameInteractor_Hooks.h"
@@ -145,8 +146,13 @@ void ObjKibako2_Destroy(Actor* thisx, PlayState* play) {
 }
 
 void ObjKibako2_Idle(ObjKibako2* this, PlayState* play) {
-    if ((this->collider.base.acFlags & AC_HIT) || (this->dyna.actor.home.rot.z != 0) ||
+    s32 sharedBreak = Anchor_ReadBreakable(&this->dyna.actor, &this->dyna.actor.world.pos);
+    if (sharedBreak || (this->collider.base.acFlags & AC_HIT) || (this->dyna.actor.home.rot.z != 0) ||
         func_80033684(play, &this->dyna.actor) != NULL) {
+        if (!sharedBreak) {
+            Anchor_SendRoomObject(&this->dyna.actor, ANCHOR_OBJECT_BROKEN, 0);
+        }
+        this->sharedBreak = sharedBreak != 0;
         ObjKibako2_Break(this, play);
         SoundSource_PlaySfxAtFixedWorldPos(play, &this->dyna.actor.world.pos, 20, NA_SE_EV_WOODBOX_BREAK);
         this->dyna.actor.flags |= ACTOR_FLAG_UPDATE_CULLING_DISABLED;
@@ -165,7 +171,9 @@ void ObjKibako2_Kill(ObjKibako2* this, PlayState* play) {
         Actor_Spawn(&play->actorCtx, play, ACTOR_EN_SW, this->dyna.actor.world.pos.x, this->dyna.actor.world.pos.y,
                     this->dyna.actor.world.pos.z, 0, this->dyna.actor.shape.rot.y, 0, params | 0x8000);
     }
-    ObjKibako2_SpawnCollectible(this, play);
+    if (!this->sharedBreak) {
+        ObjKibako2_SpawnCollectible(this, play);
+    }
     Actor_Kill(&this->dyna.actor);
 }
 

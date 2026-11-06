@@ -56,6 +56,9 @@ typedef struct DoorShutter {
     /* 0x016F */ s8 actionTimer;
     /* 0x0170 */ f32 barsClosedAmount;
     /* 0x0174 */ DoorShutterActionFunc actionFunc;
+    u64 sharedOpening;
+    s16 sharedDoorTimer;
+    f32 sharedDoorHeight;
 } DoorShutter; // size = 0x0178
 
 #endif

@@ -16,6 +16,7 @@ void EnTk_Init(Actor* thisx, PlayState* play);
 void EnTk_Destroy(Actor* thisx, PlayState* play);
 void EnTk_Update(Actor* thisx, PlayState* play);
 void EnTk_Draw(Actor* thisx, PlayState* play);
+void Anchor_ApplyDampePose(Actor* actor);
 
 s32 EnTk_CheckNextSpot(EnTk* this, PlayState* play);
 void EnTk_Rest(EnTk* this, PlayState* play);
@@ -668,8 +669,7 @@ void EnTk_Update(Actor* thisx, PlayState* play) {
     EnTk* this = (EnTk*)thisx;
     s32 pad;
 
-    Collider_UpdateCylinder(&this->actor, &this->collider);
-    CollisionCheck_SetOC(play, &play->colChkCtx, &this->collider.base);
+    Anchor_ApplyDampePose(thisx);
 
     SkelAnime_Update(&this->skelAnime);
 
@@ -678,6 +678,9 @@ void EnTk_Update(Actor* thisx, PlayState* play) {
     Actor_UpdateBgCheckInfo(play, &this->actor, 40.0f, 10.0f, 0.0f, 5);
 
     this->actionFunc(this, play);
+    Anchor_ApplyDampePose(thisx);
+    Collider_UpdateCylinder(&this->actor, &this->collider);
+    CollisionCheck_SetOC(play, &play->colChkCtx, &this->collider.base);
 
     EnTkEff_Update(this);
 

@@ -5,6 +5,7 @@
  */
 
 #include "z_obj_tsubo.h"
+#include "soh/Network/Anchor/RoomObjects.h"
 #include "overlays/effects/ovl_Effect_Ss_Kakera/z_eff_ss_kakera.h"
 #include "objects/gameplay_dangeon_keep/gameplay_dangeon_keep.h"
 #include "objects/object_tsubo/object_tsubo.h"
@@ -236,6 +237,20 @@ void ObjTsubo_WaitForObject(ObjTsubo* this, PlayState* play) {
     }
 }
 
+static void ObjTsubo_Shatter(ObjTsubo* this, PlayState* play, bool water, bool local) {
+    if (water) {
+        ObjTsubo_WaterBreak(this, play);
+    } else {
+        ObjTsubo_AirBreak(this, play);
+    }
+    SoundSource_PlaySfxAtFixedWorldPos(play, &this->actor.world.pos, 20, NA_SE_EV_POT_BROKEN);
+    if (local) {
+        ObjTsubo_SpawnCollectible(this, play);
+        Anchor_SendRoomObject(&this->actor, ANCHOR_OBJECT_BROKEN, water);
+    }
+    Actor_Kill(&this->actor);
+}
+
 void ObjTsubo_SetupIdle(ObjTsubo* this) {
     this->actionFunc = ObjTsubo_Idle;
 }
@@ -248,16 +263,10 @@ void ObjTsubo_Idle(ObjTsubo* this, PlayState* play) {
     if (Actor_HasParent(&this->actor, play)) {
         ObjTsubo_SetupLiftedUp(this);
     } else if ((this->actor.bgCheckFlags & 0x20) && (this->actor.yDistToWater > 15.0f)) {
-        ObjTsubo_WaterBreak(this, play);
-        SoundSource_PlaySfxAtFixedWorldPos(play, &this->actor.world.pos, 20, NA_SE_EV_POT_BROKEN);
-        ObjTsubo_SpawnCollectible(this, play);
-        Actor_Kill(&this->actor);
+        ObjTsubo_Shatter(this, play, true, true);
     } else if ((this->collider.base.acFlags & AC_HIT) &&
                (this->collider.info.acHitInfo->toucher.dmgFlags & 0x4FC1FFFC)) {
-        ObjTsubo_AirBreak(this, play);
-        ObjTsubo_SpawnCollectible(this, play);
-        SoundSource_PlaySfxAtFixedWorldPos(play, &this->actor.world.pos, 20, NA_SE_EV_POT_BROKEN);
-        Actor_Kill(&this->actor);
+        ObjTsubo_Shatter(this, play, false, true);
     } else {
         if (this->actor.xzDistToPlayer < 600.0f) {
             Collider_UpdateCylinder(&this->actor, &this->collider);
@@ -310,15 +319,9 @@ void ObjTsubo_Thrown(ObjTsubo* this, PlayState* play) {
     s32 pad[2];
 
     if ((this->actor.bgCheckFlags & 0xB) || (this->collider.base.atFlags & AT_HIT)) {
-        ObjTsubo_AirBreak(this, play);
-        ObjTsubo_SpawnCollectible(this, play);
-        SoundSource_PlaySfxAtFixedWorldPos(play, &this->actor.world.pos, 20, NA_SE_EV_POT_BROKEN);
-        Actor_Kill(&this->actor);
+        ObjTsubo_Shatter(this, play, false, true);
     } else if (this->actor.bgCheckFlags & 0x40) {
-        ObjTsubo_WaterBreak(this, play);
-        ObjTsubo_SpawnCollectible(this, play);
-        SoundSource_PlaySfxAtFixedWorldPos(play, &this->actor.world.pos, 20, NA_SE_EV_POT_BROKEN);
-        Actor_Kill(&this->actor);
+        ObjTsubo_Shatter(this, play, true, true);
     } else {
         ObjTsubo_ApplyGravity(this);
         Actor_UpdatePos(&this->actor);
@@ -335,6 +338,13 @@ void ObjTsubo_Thrown(ObjTsubo* this, PlayState* play) {
 
 void ObjTsubo_Update(Actor* thisx, PlayState* play) {
     ObjTsubo* this = (ObjTsubo*)thisx;
+    if (this->actionFunc != ObjTsubo_WaitForObject) {
+        s32 broken = Anchor_ReadBreakable(thisx, &thisx->world.pos);
+        if (broken != 0) {
+            ObjTsubo_Shatter(this, play, broken == 2, false);
+            return;
+        }
+    }
 
     this->actionFunc(this, play);
 }

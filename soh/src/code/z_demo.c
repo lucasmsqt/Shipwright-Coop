@@ -2163,6 +2163,7 @@ void func_80068ECC(PlayState* play, CutsceneContext* csCtx) {
                 csCtx->state++;
             }
 
+            GameInteractor_ExecuteOnScriptedCutsceneStart();
             func_80068C3C(play, csCtx);
         }
 
@@ -2186,10 +2187,16 @@ void func_8006907C(PlayState* play) {
     }
 }
 
+s32 Anchor_ForceSunSongPartTwo(PlayState* play);
+
 void Cutscene_HandleEntranceTriggers(PlayState* play) {
     EntranceCutscene* entranceCutscene;
     u8 requiredAge;
     s16 i;
+
+    if (Anchor_ForceSunSongPartTwo(play)) {
+        return;
+    }
 
     for (i = 0; i < ARRAY_COUNT(sEntranceCutsceneTable); i++) {
         entranceCutscene = &sEntranceCutsceneTable[i];
