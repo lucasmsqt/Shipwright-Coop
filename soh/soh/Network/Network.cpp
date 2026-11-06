@@ -46,13 +46,15 @@ void Network::OnDisconnected() {
 void Network::ProcessOutgoingPackets() {
 }
 
-void Network::SendDataToRemote(const char* payload) {
-    SPDLOG_DEBUG("[Network] Sending data: {}", payload);
+void Network::SendDataToRemote(const char* payload, bool quiet) {
+    if (!quiet) {
+        SPDLOG_DEBUG("[Network] Sending data: {}", payload);
+    }
     SDLNet_TCP_Send(networkSocket, payload, static_cast<int>(strlen(payload) + 1));
 }
 
 void Network::SendJsonToRemote(nlohmann::json payload) {
-    SendDataToRemote(payload.dump().c_str());
+    SendDataToRemote(payload.dump().c_str(), payload.contains("quiet"));
 }
 
 // MARK: - Private
@@ -141,7 +143,6 @@ void Network::HandleRemoteData(char payload[512]) {
 }
 
 void Network::HandleRemoteJson(std::string payload) {
-    SPDLOG_DEBUG("[Network] Received json: {}", payload);
     nlohmann::json jsonPayload;
     try {
         jsonPayload = nlohmann::json::parse(payload);
@@ -150,8 +151,12 @@ void Network::HandleRemoteJson(std::string payload) {
         return;
     }
 
+    if (!jsonPayload.contains("quiet")) {
+        SPDLOG_DEBUG("[Network] Received json: {}", payload);
+    }
+
     try {
-        OnIncomingJson(jsonPayload);
+        OnIncomingJson(std::move(jsonPayload));
     } catch (const std::exception& e) {
         SPDLOG_ERROR("[Network] Exception handling incoming JSON: {}", e.what());
     } catch (...) { SPDLOG_ERROR("[Network] Unknown exception handling incoming JSON"); }

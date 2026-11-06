@@ -50,13 +50,13 @@ void Anchor::ProcessOutgoingPackets() {
 
     // Send packets without holding the lock
     while (!packetsToSend.empty()) {
-        nlohmann::json payload = packetsToSend.front();
+        nlohmann::json payload = std::move(packetsToSend.front());
         packetsToSend.pop();
 
         if (!payload.contains("quiet")) {
             SPDLOG_DEBUG("[Anchor] Sending payload:\n{}", payload.dump());
         }
-        Network::SendJsonToRemote(payload);
+        Network::SendJsonToRemote(std::move(payload));
     }
 }
 
@@ -77,7 +77,7 @@ void Anchor::SendJsonToRemote(nlohmann::json payload) {
 
     // Queue the packet to be sent on the network thread
     std::lock_guard<std::mutex> lock(outgoingPacketQueueMutex);
-    outgoingPacketQueue.push(payload);
+    outgoingPacketQueue.push(std::move(payload));
 }
 
 void Anchor::OnIncomingJson(nlohmann::json payload) {
@@ -105,7 +105,7 @@ void Anchor::OnIncomingJson(nlohmann::json payload) {
 
     // Queue all packets to be processed on the game thread
     std::lock_guard<std::mutex> lock(incomingPacketQueueMutex);
-    incomingPacketQueue.push(payload);
+    incomingPacketQueue.push(std::move(payload));
 }
 
 void Anchor::ProcessIncomingPacketQueue() {
@@ -118,7 +118,7 @@ void Anchor::ProcessIncomingPacketQueue() {
 
     // Process packets without holding the lock
     while (!packetsToProcess.empty()) {
-        nlohmann::json payload = packetsToProcess.front();
+        nlohmann::json payload = std::move(packetsToProcess.front());
         packetsToProcess.pop();
 
         std::string packetType = payload["type"].get<std::string>();

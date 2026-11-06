@@ -41,7 +41,7 @@ class Network {
     virtual void OnConnected();
     virtual void OnDisconnected();
     virtual void ProcessOutgoingPackets();
-    void SendDataToRemote(const char* payload);
+    void SendDataToRemote(const char* payload, bool quiet = false);
     virtual void SendJsonToRemote(nlohmann::json packet);
 };
 
