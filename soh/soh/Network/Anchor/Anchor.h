@@ -94,6 +94,7 @@ class Anchor : public Network {
     void HandlePacket_DisableAnchor(nlohmann::json payload);
     void HandlePacket_EntranceDiscovered(nlohmann::json payload);
     void HandlePacket_GameComplete(nlohmann::json payload);
+    static void MergeInventoryUpgrades(Inventory& inventory, uint32_t local, uint32_t remote);
     void HandlePacket_GiveItem(nlohmann::json payload);
     void HandlePacket_OcarinaSfx(nlohmann::json payload);
     void HandlePacket_PlayerSfx(nlohmann::json payload);
@@ -152,7 +153,7 @@ class Anchor : public Network {
     void DrawMenu();
     void ProcessIncomingPacketQueue();
     void SendJsonToRemote(nlohmann::json packet);
-    bool IsSaveLoaded();
+    bool IsSaveLoaded(bool requirePlayer = true);
     bool CanTeleportTo(uint32_t clientId);
     uint32_t GetDummyPlayerClientId(const Actor* actor);
 

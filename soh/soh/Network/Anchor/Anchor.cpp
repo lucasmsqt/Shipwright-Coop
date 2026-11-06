@@ -228,12 +228,12 @@ void Anchor::RefreshClientActors() {
     spawningDummyPlayerForClientId = 0;
 }
 
-bool Anchor::IsSaveLoaded() {
+bool Anchor::IsSaveLoaded(bool requirePlayer) {
     if (gPlayState == nullptr) {
         return false;
     }
 
-    if (GET_PLAYER(gPlayState) == nullptr) {
+    if (requirePlayer && GET_PLAYER(gPlayState) == nullptr) {
         return false;
     }
 

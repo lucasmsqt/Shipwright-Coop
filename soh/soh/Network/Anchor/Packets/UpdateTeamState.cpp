@@ -229,6 +229,7 @@ void Anchor::HandlePacket_UpdateTeamState(nlohmann::json payload) {
             }
         }
 
+        MergeInventoryUpgrades(loadedData.inventory, gSaveContext.inventory.upgrades, loadedData.inventory.upgrades);
         gSaveContext.inventory = loadedData.inventory;
 
         // The commented out code below is an attempt at sending the entire randomizer seed over, in hopes that a player
