@@ -31,6 +31,7 @@
 #include "soh/OTRGlobals.h"
 #include "soh/Enhancements/savestate_serialize.h"
 #include "soh/Network/Anchor/RoomObjects.h"
+#include "soh/Network/Anchor/DodongoSync.h"
 
 #include <string.h>
 #include <stdlib.h>
@@ -2295,6 +2296,9 @@ void Player_InitExplosiveIA(PlayState* play, Player* this) {
         this->getItemEntry = (GetItemEntry)GET_ITEM_NONE;
         this->unk_3BC.y = spawnedActor->shape.rot.y - this->actor.shape.rot.y;
         this->stateFlags1 |= PLAYER_STATE1_CARRYING_ACTOR;
+        if (spawnedActor->id == ACTOR_EN_BOM) {
+            Anchor_MarkDodongoBomb(spawnedActor);
+        }
     }
 }
 

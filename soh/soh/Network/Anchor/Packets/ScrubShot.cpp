@@ -52,10 +52,10 @@ bool Anchor::IsScrubShotPeer(uint32_t id, const WorldPeer& peer) {
 }
 
 bool Anchor::ShouldSpawnScrubShot(Actor* scrub) {
-    return FindScrubController(scrub) == ownClientId;
+    return FindNearestCombatController(scrub) == ownClientId;
 }
 
-uint32_t Anchor::FindScrubController(Actor* scrub) {
+uint32_t Anchor::FindNearestCombatController(Actor* scrub) {
     if (!isConnected || !CanShareCombat() || scrub->room != gPlayState->roomCtx.curRoom.num) {
         return ownClientId;
     }

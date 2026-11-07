@@ -3,6 +3,7 @@
 
 #include <libultraship/libultra.h>
 #include "global.h"
+#include "soh/Network/Anchor/DodongoSync.h"
 
 struct EnBombf;
 
@@ -20,6 +21,8 @@ typedef struct EnBombf {
     /* 0x0206 */ s16 flashSpeedScale;
     /* 0x0208 */ f32 flashIntensity;
     /* 0x020C */ f32 flowerBombScale;
+    AnchorDodongoBomb anchorBomb;
+    u64 anchorFlowerSeen;
 } EnBombf; // size = 0x0210
 
 typedef enum {

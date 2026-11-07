@@ -259,6 +259,10 @@ void EnBom_Update(Actor* thisx, PlayState* play2) {
     PlayState* play = play2;
     EnBom* this = (EnBom*)thisx;
 
+    if (Anchor_UpdateDodongoBombReplica(thisx, play, &this->flashIntensity)) {
+        return;
+    }
+
     thisx->gravity = -1.2f;
 
     if (this->timer != 0) {

@@ -57,6 +57,7 @@ typedef enum {
     GI_ENEMY_HIT_SKULLTULA_ARROW,
     GI_ENEMY_HIT_DEFEAT,
     GI_ENEMY_HIT_SCRUB_RUN,
+    GI_ENEMY_HIT_DODONGO_SWALLOW,
     GI_ENEMY_HIT_MAX,
 } GIEnemyHitReaction;
 void GameInteractor_ExecuteOnEnemyDamage(Actor* actor, int32_t damage, int32_t reaction);

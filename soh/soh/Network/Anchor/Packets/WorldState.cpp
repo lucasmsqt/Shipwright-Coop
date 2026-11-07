@@ -113,9 +113,9 @@ uint32_t Anchor::GetNpcCoordinator() const {
     return coordinator;
 }
 
-uint32_t Anchor::ChooseNpcAuthority(const NpcArea& area) const {
+uint32_t Anchor::ChooseNpcAuthority(const NpcArea& area, bool requireNpcSync) const {
     const auto isSameArea = [&](uint32_t id, const WorldPeer& peer) {
-        return peer.syncNpcs && peer.visit != 0 && peer.GetArea() == area && IsSharedTeamMember(id);
+        return (!requireNpcSync || peer.syncNpcs) && peer.visit != 0 && peer.GetArea() == area && IsSharedTeamMember(id);
     };
 
     const bool localCandidate = localWorldPeer.GetArea() == area;
@@ -477,6 +477,7 @@ void Anchor::UpdateWorldState() {
         return;
     }
     const bool liveActors = IsGuardCourtyard(scene) || scene == SCENE_SHOOTING_GALLERY ||
+                            scene == SCENE_DODONGOS_CAVERN || scene == SCENE_DODONGOS_CAVERN_BOSS ||
                             scene == SCENE_KAKARIKO_VILLAGE || scene == SCENE_GRAVEYARD ||
                             ((scene == SCENE_DEKU_TREE_BOSS || (scene == SCENE_HYRULE_FIELD && !IS_DAY)) && CanShareCombat());
     nextWorldUpdate = now + (liveActors ? 100ms : worldUpdateInterval);
@@ -514,6 +515,7 @@ void Anchor::UpdateWorldState() {
                                                  now - localWorldPeer.entered).count(),
                                              maxAreaAgeMs);
     AddRoomObjectSnapshot(payload);
+    AddDodongoSnapshot(payload);
     AddDynamicActorSnapshot(payload);
     if (!inCutscene && syncNpcs && scene == SCENE_KAKARIKO_VILLAGE) {
         AddNpcGazeSnapshot(payload);
@@ -614,6 +616,7 @@ void Anchor::HandlePacket_WorldState(const nlohmann::json& payload) {
                                payload.at("upgrades").get<uint32_t>());
     }
     ReadRoomObjectSnapshot(payload, peer);
+    ReadDodongoSnapshot(payload, peer);
     ReadDynamicActorSnapshot(payload, peer);
     if (peer.scene == SCENE_KAKARIKO_VILLAGE && SyncNpcPositionsEnabled()) {
         ReadNpcGazeSnapshot(payload, peer);
@@ -674,6 +677,7 @@ void Anchor::HandlePacket_WorldState(const nlohmann::json& payload) {
     }
     const bool sameSceneClock = peer.hasClock && peer.scene == gPlayState->sceneNum;
     worldPeers[id] = std::move(peer);
+    SpawnDodongoBombReplicas(id, worldPeers.at(id));
 
     if (sameSceneClock) {
         ApplyTeamWorldTime();

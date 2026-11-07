@@ -14,6 +14,8 @@ extern PlayState* gPlayState;
 
 namespace {
 constexpr size_t maxRoomObjects = 128;
+constexpr auto bombFlowerFrame = std::chrono::milliseconds(50);
+constexpr int bombFlowerRegrowthFrames = 200;
 
 bool IsBreakable(int id) {
     return id == ACTOR_OBJ_TSUBO || id == ACTOR_OBJ_KIBAKO || id == ACTOR_OBJ_KIBAKO2;
@@ -49,8 +51,12 @@ Anchor::RoomObjectKey Anchor::GetRoomObjectKey(const Actor* actor) {
 
 Anchor::RoomObjectState Anchor::DecodeRoomObject(const nlohmann::json& entry) {
     const auto version = entry.at(1).get<std::array<uint32_t, 2>>();
-    return { static_cast<uint64_t>(version[0]) << 32 | version[1], entry.at(2).get<Vec3f>(), entry.at(3).get<int>(),
-             entry.at(4).get<int>(), std::chrono::steady_clock::now() };
+    const int phase = entry.at(3).get<int>();
+    const int age = phase == ANCHOR_BOMB_FLOWER_PLUCKED && entry.size() > 5
+                        ? std::clamp(entry.at(5).get<int>(), 0, bombFlowerRegrowthFrames)
+                        : 0;
+    return { static_cast<uint64_t>(version[0]) << 32 | version[1], entry.at(2).get<Vec3f>(), phase,
+             entry.at(4).get<int>(), std::chrono::steady_clock::now() - bombFlowerFrame * age };
 }
 
 bool Anchor::IsValidRoomObject(const RoomObjectKey& key, const RoomObjectState& state) {
@@ -86,6 +92,13 @@ bool Anchor::IsValidRoomObject(const RoomObjectKey& key, const RoomObjectState& 
     if (key[0] == ACTOR_OBJ_SYOKUDAI) {
         return key[2] == 0 && state.phase == ANCHOR_TORCH_STATE && state.detail >= -1 && state.detail <= 1310;
     }
+    if (key[0] == ACTOR_EN_BOMBF) {
+        return key[2] == 0 && state.phase == ANCHOR_BOMB_FLOWER_PLUCKED && state.detail == 180;
+    }
+    if (key[0] == ACTOR_BG_DODOAGO) {
+        return key[1] < 64 && (key[2] == 0 || key[2] == 1) && state.phase == ANCHOR_DODONGO_EYE_LIT &&
+               state.detail == 0;
+    }
     return key[0] == ACTOR_EN_HINTNUTS && key[2] == 0 &&
            (state.phase == ANCHOR_SCRUB_HIT || state.phase == ANCHOR_SCRUB_LEFT) &&
            state.detail >= -4 && state.detail <= 3;
@@ -94,7 +107,9 @@ bool Anchor::IsValidRoomObject(const RoomObjectKey& key, const RoomObjectState& 
 void Anchor::MergeRoomObject(const RoomObjectKey& key, const RoomObjectState& state) {
     const auto existing = roomObjects.find(key);
     if (existing != roomObjects.end()) {
-        if (state.version > existing->second.version && existing->second.phase != ANCHOR_SCRUB_LEFT &&
+        const bool expiredPlant = state.phase == ANCHOR_BOMB_FLOWER_PLUCKED &&
+            std::chrono::steady_clock::now() - existing->second.received >= bombFlowerFrame * bombFlowerRegrowthFrames;
+        if ((expiredPlant || state.version > existing->second.version) && existing->second.phase != ANCHOR_SCRUB_LEFT &&
             existing->second.phase != ANCHOR_OBJECT_BROKEN && existing->second.phase != ANCHOR_TREE_SKULLTULA) {
             existing->second = state;
         }
@@ -137,7 +152,8 @@ void Anchor::UpdateRoomObjects() {
 }
 
 void Anchor::SendRoomObject(Actor* actor, int phase, int detail) {
-    if (!CanShareRoomObjects() || actor->room != gPlayState->roomCtx.curRoom.num) {
+    if (!CanShareRoomObjects() || (actor->room != gPlayState->roomCtx.curRoom.num &&
+        !(actor->room < 0 && phase == ANCHOR_BOMB_FLOWER_PLUCKED))) {
         return;
     }
     const auto key = GetRoomObjectKey(actor);
@@ -148,16 +164,41 @@ void Anchor::SendRoomObject(Actor* actor, int phase, int detail) {
     PublishRoomObject(key, actor->world.pos, phase, detail);
 }
 
+void Anchor::RecordDodongoEye(Actor* actor, int eye) {
+    if (!CanShareRoomObjects() || gPlayState->sceneNum != SCENE_DODONGOS_CAVERN ||
+        (actor->room >= 0 && actor->room != gPlayState->roomCtx.curRoom.num)) {
+        return;
+    }
+    UpdateRoomObjects();
+    const RoomObjectKey key{ ACTOR_BG_DODOAGO, actor->params & 0x3F, eye };
+    if (!roomObjects.contains(key)) {
+        PublishRoomObject(key, actor->world.pos, ANCHOR_DODONGO_EYE_LIT, 0);
+    }
+}
+
+int Anchor::GetDodongoEyes(Actor* actor) {
+    if (!CanShareRoomObjects() || gPlayState->sceneNum != SCENE_DODONGOS_CAVERN ||
+        (actor->room >= 0 && actor->room != gPlayState->roomCtx.curRoom.num)) {
+        return 0;
+    }
+    UpdateRoomObjects();
+    const int flag = actor->params & 0x3F;
+    const int leftEye = roomObjects.contains({ ACTOR_BG_DODOAGO, flag, 0 });
+    const int rightEye = roomObjects.contains({ ACTOR_BG_DODOAGO, flag, 1 });
+    return leftEye | (rightEye << 1);
+}
+
 void Anchor::PublishRoomObject(const RoomObjectKey& key, const Vec3f& position, int phase, int detail) {
     const auto existing = roomObjects.find(key);
     const uint64_t previous = existing == roomObjects.end() ? 0 : existing->second.version >> 32;
-    const uint64_t sequence = IsTransientRoomObject(phase) ?
+    const bool useRoomSequence = IsTransientRoomObject(phase) || phase == ANCHOR_BOMB_FLOWER_PLUCKED;
+    const uint64_t sequence = useRoomSequence ?
         std::max<uint64_t>(transientRoomSequence, previous) + 1 : previous + 1;
     RoomObjectState state{ sequence << 32 | ownClientId, position, phase, detail, std::chrono::steady_clock::now() };
     if (!IsValidRoomObject(key, state)) {
         return;
     }
-    if (IsTransientRoomObject(phase)) {
+    if (useRoomSequence) {
         transientRoomSequence = static_cast<uint32_t>(sequence);
     }
     MergeRoomObject(key, state);
@@ -262,7 +303,8 @@ void Anchor::ApplyTreeSkulltulas() {
 }
 
 int Anchor::ReadRoomObject(Actor* actor, Vec3f* position, s32* detail, u64* seen) {
-    if (!CanShareRoomObjects() || actor->room != gPlayState->roomCtx.curRoom.num) {
+    if (!CanShareRoomObjects() || (actor->room != gPlayState->roomCtx.curRoom.num &&
+        !(actor->room < 0 && actor->id == ACTOR_EN_BOMBF))) {
         return 0;
     }
     UpdateRoomObjects();
@@ -270,7 +312,8 @@ int Anchor::ReadRoomObject(Actor* actor, Vec3f* position, s32* detail, u64* seen
         return 0;
     }
     const auto state = roomObjects.find(GetRoomObjectKey(actor));
-    if (state == roomObjects.end() || state->second.version <= *seen) {
+    if (state == roomObjects.end() ||
+        (actor->id == ACTOR_EN_BOMBF ? state->second.version == *seen : state->second.version <= *seen)) {
         return 0;
     }
     const auto& sample = state->second;
@@ -280,6 +323,13 @@ int Anchor::ReadRoomObject(Actor* actor, Vec3f* position, s32* detail, u64* seen
     }
     *position = sample.position;
     *detail = sample.detail;
+    if (sample.phase == ANCHOR_BOMB_FLOWER_PLUCKED) {
+        const auto age = (std::chrono::steady_clock::now() - sample.received) / bombFlowerFrame;
+        if (age >= bombFlowerRegrowthFrames) {
+            return 0;
+        }
+        *detail -= static_cast<int>(age);
+    }
     return sample.phase;
 }
 
@@ -298,7 +348,7 @@ void Anchor::HandlePacket_RoomObject(const nlohmann::json& payload) {
     const auto state = DecodeRoomObject(entry);
     if (static_cast<uint32_t>(state.version) == sender && IsValidRoomObject(key, state)) {
         UpdateRoomObjects();
-        if (IsTransientRoomObject(state.phase)) {
+        if (IsTransientRoomObject(state.phase) || state.phase == ANCHOR_BOMB_FLOWER_PLUCKED) {
             transientRoomSequence = std::max(transientRoomSequence, static_cast<uint32_t>(state.version >> 32));
         }
         MergeRoomObject(key, state);
@@ -313,8 +363,16 @@ void Anchor::AddRoomObjectSnapshot(nlohmann::json& payload) {
             if (IsTransientRoomObject(state.phase)) {
                 continue;
             }
-            objects.push_back({ key, { state.version >> 32, static_cast<uint32_t>(state.version) }, state.position,
-                                state.phase, state.detail });
+            auto object = nlohmann::json::array({ key, { state.version >> 32, static_cast<uint32_t>(state.version) },
+                                                  state.position, state.phase, state.detail });
+            if (state.phase == ANCHOR_BOMB_FLOWER_PLUCKED) {
+                const auto age = (std::chrono::steady_clock::now() - state.received) / bombFlowerFrame;
+                if (age >= bombFlowerRegrowthFrames) {
+                    continue;
+                }
+                object.push_back(age);
+            }
+            objects.push_back(std::move(object));
         }
         if (!objects.empty()) {
             payload["roomObjects"] = std::move(objects);
@@ -391,4 +449,14 @@ extern "C" void Anchor_StartSunStun(PlayState* play) {
 
 extern "C" s32 Anchor_ConsumeSunStun(Actor* actor, u64* seen) {
     return Anchor::Instance == nullptr ? 0 : Anchor::Instance->ConsumeSunStun(actor, seen);
+}
+
+extern "C" void Anchor_RecordDodongoEye(Actor* actor, s32 eye) {
+    if (Anchor::Instance != nullptr) {
+        Anchor::Instance->RecordDodongoEye(actor, eye);
+    }
+}
+
+extern "C" s32 Anchor_GetDodongoEyes(Actor* actor) {
+    return Anchor::Instance == nullptr ? 0 : Anchor::Instance->GetDodongoEyes(actor);
 }

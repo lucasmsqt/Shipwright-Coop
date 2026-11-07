@@ -5,6 +5,7 @@
  */
 
 #include "z_bg_dodoago.h"
+#include "soh/Network/Anchor/RoomObjects.h"
 #include "overlays/actors/ovl_En_Bom/z_en_bom.h"
 #include "objects/object_ddan_objects/object_ddan_objects.h"
 #include "soh/Enhancements/savestate_serialize.h"
@@ -155,6 +156,17 @@ void BgDodoago_Destroy(Actor* thisx, PlayState* play) {
     Collider_DestroyCylinder(play, &this->colliderRight);
 }
 
+static void BgDodoago_BeginOpenJaw(BgDodoago* this, PlayState* play, bool camera) {
+    Flags_SetSwitch(play, this->dyna.actor.params & 0x3F);
+    this->state = 0;
+    Audio_PlaySfxGeneral(NA_SE_SY_CORRECT_CHIME, &gSfxDefaultPos, 4, &gSfxDefaultFreqAndVolScale, &gSfxDefaultFreqAndVolScale,
+                         &gSfxDefaultReverb);
+    BgDodoago_SetupAction(this, BgDodoago_OpenJaw);
+    if (camera) {
+        OnePointCutscene_Init(play, 3380, 160, &this->dyna.actor, CAM_ID_MAIN);
+    }
+}
+
 void BgDodoago_WaitExplosives(BgDodoago* this, PlayState* play) {
     Actor* explosive = Actor_GetCollidedExplosive(play, &this->colliderMain.base);
 
@@ -164,14 +176,13 @@ void BgDodoago_WaitExplosives(BgDodoago* this, PlayState* play) {
                 ? BGDODOAGO_EYE_RIGHT
                 : BGDODOAGO_EYE_LEFT;
 
+        if (play->roomCtx.unk_74[this->state] == 0) {
+            Anchor_RecordDodongoEye(&this->dyna.actor, this->state);
+        }
+
         if (((play->roomCtx.unk_74[BGDODOAGO_EYE_LEFT] == 255) && (this->state == BGDODOAGO_EYE_RIGHT)) ||
             ((play->roomCtx.unk_74[BGDODOAGO_EYE_RIGHT] == 255) && (this->state == BGDODOAGO_EYE_LEFT))) {
-            Flags_SetSwitch(play, this->dyna.actor.params & 0x3F);
-            this->state = 0;
-            Audio_PlaySfxGeneral(NA_SE_SY_CORRECT_CHIME, &gSfxDefaultPos, 4, &gSfxDefaultFreqAndVolScale,
-                                 &gSfxDefaultFreqAndVolScale, &gSfxDefaultReverb);
-            BgDodoago_SetupAction(this, BgDodoago_OpenJaw);
-            OnePointCutscene_Init(play, 3380, 160, &this->dyna.actor, CAM_ID_MAIN);
+            BgDodoago_BeginOpenJaw(this, play, true);
         } else if (play->roomCtx.unk_74[this->state] == 0) {
             OnePointCutscene_Init(play, 3065, 40, &this->dyna.actor, CAM_ID_MAIN);
             BgDodoago_SetupAction(this, BgDodoago_LightOneEye);
@@ -281,6 +292,27 @@ void BgDodoago_Update(Actor* thisx, PlayState* play) {
     BgDodoago* this = (BgDodoago*)thisx;
     Actor* actor;
     EnBom* bomb;
+
+    if (this->actionFunc == BgDodoago_WaitExplosives || this->actionFunc == BgDodoago_LightOneEye) {
+        s32 eyes = Anchor_GetDodongoEyes(thisx);
+        if (play->roomCtx.unk_74[BGDODOAGO_EYE_LEFT] == 255) {
+            eyes |= 1 << BGDODOAGO_EYE_LEFT;
+        }
+        if (play->roomCtx.unk_74[BGDODOAGO_EYE_RIGHT] == 255) {
+            eyes |= 1 << BGDODOAGO_EYE_RIGHT;
+        }
+        if (eyes == 3 || Flags_GetSwitch(play, thisx->params & 0x3F)) {
+            BgDodoago_BeginOpenJaw(this, play, !Play_InCsMode(play) && play->pauseCtx.state == 0);
+        } else if (this->actionFunc == BgDodoago_WaitExplosives && eyes != 0) {
+            const s32 eye = (eyes & (1 << BGDODOAGO_EYE_LEFT)) ? BGDODOAGO_EYE_LEFT : BGDODOAGO_EYE_RIGHT;
+            if (play->roomCtx.unk_74[eye] == 0) {
+                this->state = eye;
+                BgDodoago_SetupAction(this, BgDodoago_LightOneEye);
+                Audio_PlaySfxGeneral(NA_SE_SY_CORRECT_CHIME, &gSfxDefaultPos, 4, &gSfxDefaultFreqAndVolScale,
+                                     &gSfxDefaultFreqAndVolScale, &gSfxDefaultReverb);
+            }
+        }
+    }
 
     if (this->dyna.actor.parent == NULL) {
         // this is a "bomb catcher", it kills the XZ speed and sets the timer for bombs that are dropped through the

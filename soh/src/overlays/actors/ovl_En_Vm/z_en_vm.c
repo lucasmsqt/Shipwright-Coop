@@ -5,6 +5,7 @@
  */
 
 #include "z_en_vm.h"
+#include "soh/Network/Anchor/DodongoSync.h"
 #include "objects/object_vm/object_vm.h"
 #include "overlays/actors/ovl_En_Bom/z_en_bom.h"
 #include "objects/gameplay_keep/gameplay_keep.h"
@@ -307,6 +308,8 @@ void EnVm_Attack(EnVm* this, PlayState* play) {
 
         if (this->unk_260 > 2) {
             CollisionCheck_SetAT(play, &play->colChkCtx, &this->colliderQuad1.base);
+        } else {
+            Anchor_RefreshBeamosBeam();
         }
 
         this->unk_260 = 3;
@@ -421,6 +424,8 @@ void EnVm_CheckHealth(EnVm* this, PlayState* play) {
 void EnVm_Update(Actor* thisx, PlayState* play) {
     EnVm* this = (EnVm*)thisx;
     CollisionCheckContext* colChkCtx = &play->colChkCtx;
+    AnchorBeamosBeam beam;
+    const bool wasShared = this->anchorSharedBeam;
 
     if (this->actor.colChkInfo.health != 0) {
         EnVm_CheckHealth(this, play);
@@ -432,7 +437,30 @@ void EnVm_Update(Actor* thisx, PlayState* play) {
         Audio_PlayActorSound2(&this->actor, NA_SE_EN_BIMOS_LAZER_GND - SFX_FLAG);
     }
 
-    this->actionFunc(this, play);
+    this->anchorSharedBeam = this->unk_21C != 2 && Anchor_ReadBeamosBeam(thisx, &beam);
+    if (this->anchorSharedBeam) {
+        this->beamRot = beam.rotation;
+        this->beamScale = beam.scale;
+        this->beamPos3 = beam.endpoint;
+        this->headRotY = beam.headYaw;
+        this->unk_260 = beam.stage;
+        this->skelAnime.curFrame = beam.frame;
+        this->skelAnime.startFrame = 0.0f;
+        this->skelAnime.endFrame = Animation_GetLastFrame(&gBeamosAnim);
+        this->skelAnime.playSpeed = 0.0f;
+        SkelAnime_Update(&this->skelAnime);
+        if (beam.stage >= 3 && beam.scale.z > 0.0f) {
+            Audio_PlayActorSound2(&this->actor, NA_SE_EN_BIMOS_LAZER - SFX_FLAG);
+            CollisionCheck_SetAT(play, colChkCtx, &this->colliderQuad1.base);
+        }
+        this->colliderQuad1.base.atFlags &= ~AT_HIT;
+    } else {
+        if (wasShared && this->unk_21C != 2) {
+            this->beamScale.x = this->beamScale.z = 0.0f;
+            EnVm_SetupWait(this);
+        }
+        this->actionFunc(this, play);
+    }
     this->beamTexScroll += 0xC;
 
     if (this->actor.colChkInfo.health != 0 && this->unk_21C != 2) {
@@ -481,7 +509,7 @@ void EnVm_PostLimbDraw(PlayState* play, s32 limbIndex, Gfx** dList, Vec3s* rot, 
         Matrix_MultVec3f(&D_80B2EB1C, &this->beamPos1);
         Matrix_MultVec3f(&D_80B2EB28, &this->beamPos2);
 
-        if (this->unk_260 >= 3) {
+        if (this->unk_260 >= 3 && !this->anchorSharedBeam) {
             poly = NULL;
             sp80.z = (this->beamScale.z + 500.0f) * (this->actor.scale.y * 10000.0f);
             Matrix_MultVec3f(&sp80, &this->beamPos3);
@@ -492,7 +520,9 @@ void EnVm_PostLimbDraw(PlayState* play, s32 limbIndex, Gfx** dList, Vec3s* rot, 
                 this->unk_260 = 4;
                 this->beamPos3 = posResult;
             }
-            if (this->beamScale.z != 0.0f) {
+        }
+        if (this->unk_260 >= 3) {
+            if (this->beamScale.z > 0.0f) {
                 dist = 100.0f;
                 if (this->actor.scale.y > 0.01f) {
                     dist = 70.0f;

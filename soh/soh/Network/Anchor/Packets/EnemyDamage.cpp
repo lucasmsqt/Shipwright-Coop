@@ -14,7 +14,8 @@ extern PlayState* gPlayState;
 namespace {
 bool IsSharedEnemy(int id) {
     return id == ACTOR_EN_DEKUBABA || id == ACTOR_EN_KAREBABA || id == ACTOR_BOSS_GOMA || id == ACTOR_EN_SW ||
-           id == ACTOR_EN_ST || id == ACTOR_EN_RD || id == ACTOR_EN_WF || id == ACTOR_EN_DEKUNUTS;
+           id == ACTOR_EN_ST || id == ACTOR_EN_RD || id == ACTOR_EN_WF || id == ACTOR_EN_DEKUNUTS ||
+           id == ACTOR_BOSS_DODONGO;
 }
 
 bool IsBaba(int id) {
@@ -52,6 +53,7 @@ bool IsEligibleEnemy(Actor* actor) {
         return true;
     }
     return IsSharedEnemy(actor->id) && (actor->id == ACTOR_EN_RD || actor->id == ACTOR_EN_WF ||
+                                      actor->id == ACTOR_BOSS_DODONGO ||
                                       GetActorListIndex(actor) >= 0);
 }
 
@@ -209,6 +211,7 @@ void Anchor::QueueEnemyDamage(const EnemyKey& key, int32_t damage, int32_t react
         (key[0] == ACTOR_EN_KAREBABA && (damage != 0 || total != 0 || reaction != GI_ENEMY_HIT_KAREBABA_KILLED)) ||
         (reaction == GI_ENEMY_HIT_KAREBABA_KILLED && key[0] != ACTOR_EN_KAREBABA) ||
         (reaction == GI_ENEMY_HIT_SCRUB_RUN && key[0] != ACTOR_EN_DEKUNUTS) ||
+        (reaction == GI_ENEMY_HIT_DODONGO_SWALLOW && (key[0] != ACTOR_BOSS_DODONGO || total != 0 || damage != 0)) ||
         (reaction == GI_ENEMY_HIT_DEFEAT && key[0] != ACTOR_EN_WF && key[0] != ACTOR_EN_DEKUNUTS) ||
         (reaction == GI_ENEMY_HIT_SKULLTULA_ARROW && key[0] != ACTOR_EN_ST)) {
         return;

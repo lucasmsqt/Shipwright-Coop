@@ -17,6 +17,8 @@ enum AnchorRoomObjectPhase {
     ANCHOR_DOOR_OPENING,
     ANCHOR_SUN_STUN,
     ANCHOR_TORCH_STATE,
+    ANCHOR_BOMB_FLOWER_PLUCKED,
+    ANCHOR_DODONGO_EYE_LIT,
 };
 
 #ifdef __cplusplus
@@ -32,6 +34,8 @@ void Anchor_SendDoorOpening(struct Actor* actor, s32 leaf, s32 style);
 s32 Anchor_ReadDoorOpening(struct Actor* actor, s32 leaf, u64* seen);
 void Anchor_StartSunStun(struct PlayState* play);
 s32 Anchor_ConsumeSunStun(struct Actor* actor, u64* seen);
+void Anchor_RecordDodongoEye(struct Actor* actor, s32 eye);
+s32 Anchor_GetDodongoEyes(struct Actor* actor);
 
 #ifdef __cplusplus
 }

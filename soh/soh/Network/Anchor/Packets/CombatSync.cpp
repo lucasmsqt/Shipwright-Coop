@@ -343,7 +343,7 @@ bool Anchor::ApplyScrubPose(Actor* actor, ScrubMotion* motion) {
         actor->colChkInfo.health == 0 || worldPeers.empty()) {
         return false;
     }
-    const auto controller = FindScrubController(actor);
+    const auto controller = FindNearestCombatController(actor);
     if (controller == ownClientId) {
         return false;
     }

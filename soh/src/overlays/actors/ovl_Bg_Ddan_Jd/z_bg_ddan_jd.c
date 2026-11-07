@@ -6,6 +6,7 @@
 
 #include "z_bg_ddan_jd.h"
 #include "objects/object_ddan_objects/object_ddan_objects.h"
+#include "soh/Network/Anchor/DodongoSync.h"
 
 #define FLAGS (ACTOR_FLAG_UPDATE_CULLING_DISABLED | ACTOR_FLAG_DRAW_CULLING_DISABLED)
 
@@ -169,9 +170,28 @@ void BgDdanJd_Move(BgDdanJd* this, PlayState* play) {
     BgDdanJd_MoveEffects(this, play);
 }
 
+void BgDdanJd_GetAnchorMotion(Actor* actor, AnchorDodongoPlatform* motion) {
+    BgDdanJd* this = (BgDdanJd*)actor;
+    motion->height = actor->world.pos.y - actor->home.pos.y;
+    motion->moving = this->actionFunc == BgDdanJd_Move;
+    motion->targetHeight = motion->moving ? this->targetY - actor->home.pos.y : motion->height;
+    motion->state = this->state;
+    motion->idleTimer = this->idleTimer;
+    motion->speed = this->ySpeed;
+}
+
 void BgDdanJd_Update(Actor* thisx, PlayState* play) {
     BgDdanJd* this = (BgDdanJd*)thisx;
+    AnchorDodongoPlatform motion;
 
+    if (Anchor_ReadDodongoPlatform(thisx, &motion, &this->anchorMotionSeen)) {
+        thisx->world.pos.y = thisx->home.pos.y + motion.height;
+        this->targetY = thisx->home.pos.y + motion.targetHeight;
+        this->state = motion.state;
+        this->idleTimer = motion.idleTimer;
+        this->ySpeed = motion.speed;
+        this->actionFunc = motion.moving ? BgDdanJd_Move : BgDdanJd_Idle;
+    }
     this->actionFunc(this, play);
 }
 

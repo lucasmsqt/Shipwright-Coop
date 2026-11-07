@@ -1,4 +1,5 @@
 #include "z_boss_dodongo.h"
+#include "soh/Network/Anchor/DodongoSync.h"
 #include "textures/boss_title_cards/object_kingdodongo.h"
 #include "objects/object_kingdodongo/object_kingdodongo.h"
 #include "overlays/actors/ovl_Door_Warp1/z_door_warp1.h"
@@ -993,6 +994,148 @@ void BossDodongo_Roll(BossDodongo* this, PlayState* play) {
     }
 }
 
+static BossDodongoActionFunc const sAnchorBossActions[] = {
+    BossDodongo_IntroCutscene, BossDodongo_Walk, BossDodongo_Roll, BossDodongo_Inhale, BossDodongo_BlowFire,
+    BossDodongo_Explode, BossDodongo_LayDown, BossDodongo_Vulnerable, BossDodongo_GetUp, BossDodongo_Damaged,
+    BossDodongo_DeathCutscene,
+};
+
+static void* const sAnchorBossAnimations[] = {
+    &object_kingdodongo_Anim_001074, &object_kingdodongo_Anim_002D0C, &object_kingdodongo_Anim_003CF8,
+    &object_kingdodongo_Anim_0042A8, &object_kingdodongo_Anim_004E0C, &object_kingdodongo_Anim_0061D4,
+    &object_kingdodongo_Anim_008EEC, &object_kingdodongo_Anim_009D10, &object_kingdodongo_Anim_00DF38,
+    &object_kingdodongo_Anim_00E848, &object_kingdodongo_Anim_00F0D8, &object_kingdodongo_Anim_01CAE0,
+    &object_kingdodongo_Anim_01D934,
+};
+
+s32 BossDodongo_GetAnchorState(Actor* actor, AnchorDodongoBoss* state) {
+    BossDodongo* this = (BossDodongo*)actor;
+    s32 phase;
+    s32 animation;
+
+    for (phase = 0; phase < ARRAY_COUNT(sAnchorBossActions); ++phase) {
+        if (sAnchorBossActions[phase] == this->actionFunc) {
+            break;
+        }
+    }
+    for (animation = 0; animation < ARRAY_COUNT(sAnchorBossAnimations); ++animation) {
+        if (sAnchorBossAnimations[animation] == this->skelAnime.animation) {
+            break;
+        }
+    }
+    if (phase == ARRAY_COUNT(sAnchorBossActions) || animation == ARRAY_COUNT(sAnchorBossAnimations)) {
+        return false;
+    }
+    *state = (AnchorDodongoBoss){
+        actor->world.pos, actor->world.rot, actor->speedXZ, this->skelAnime.curFrame, this->skelAnime.playSpeed,
+        this->skelAnime.startFrame, this->skelAnime.endFrame, actor->shape.yOffset, this->unk_1F8,
+        phase, animation, this->skelAnime.mode, this->health, this->csState, this->unk_1DA, this->unk_1AC,
+        this->unk_1AE, this->unk_1A0, this->unk_1A2, this->numWallCollisions, this->unk_1C4,
+    };
+    return true;
+}
+
+static void BossDodongo_EndReplicatedIntro(BossDodongo* this, PlayState* play) {
+    if (this->cutsceneCamera != 0) {
+        func_800C08AC(play, this->cutsceneCamera, 0);
+        this->cutsceneCamera = 0;
+        func_80064534(play, &play->csCtx);
+        Player_SetCsActionWithHaltedActors(play, &this->actor, 7);
+    }
+    this->unk_1BC = 0;
+    this->actor.flags |= ACTOR_FLAG_ATTENTION_ENABLED;
+    Audio_QueueSeqCmd(SEQ_PLAYER_BGM_MAIN << 24 | NA_BGM_FIRE_BOSS);
+    Flags_SetEventChkInf(EVENTCHKINF_BEGAN_KING_DODONGO_BATTLE);
+}
+
+static s32 BossDodongo_UpdateAnchor(BossDodongo* this, PlayState* play) {
+    AnchorDodongoBoss state;
+    Actor* actor = &this->actor;
+    s32 reaction = GI_ENEMY_HIT_NORMAL;
+    const s32 damage = GameInteractor_ConsumeSharedEnemyDamage(actor, &reaction, NULL);
+
+    if (this->actionFunc == BossDodongo_DeathCutscene) {
+        return false;
+    }
+    if (!Anchor_ReadDodongoBoss(actor, &state)) {
+        if (reaction == GI_ENEMY_HIT_DODONGO_SWALLOW && this->actionFunc == BossDodongo_Inhale) {
+            Audio_PlayActorSound2(actor, NA_SE_EN_DODO_K_DRINK);
+            BossDodongo_SetupExplode(this);
+        }
+        if (damage > 0 && (this->actionFunc == BossDodongo_LayDown || this->actionFunc == BossDodongo_Vulnerable)) {
+            this->health -= damage;
+            this->unk_1C0 = 5;
+            Audio_PlayActorSound2(actor, NA_SE_EN_DODO_K_DAMAGE);
+            BossDodongo_SetupDamaged(this);
+        }
+        return false;
+    }
+
+    if (state.phase == ANCHOR_DODONGO_INTRO) {
+        if (this->actionFunc == BossDodongo_IntroCutscene && this->csState == 0 && state.introState > 0) {
+            this->csState = 1;
+            this->unk_1A0 = 1;
+            actor->world.pos.x = -1390.0f;
+            actor->world.pos.z = -3374.0f;
+        }
+        return false;
+    }
+    if (this->actionFunc == BossDodongo_IntroCutscene) {
+        BossDodongo_EndReplicatedIntro(this, play);
+    }
+    actor->world.pos = state.position;
+    actor->world.rot = state.rotation;
+    actor->speedXZ = state.speed;
+    this->health = state.health;
+    this->unk_1A0 = state.corner;
+    this->unk_1A2 = state.direction;
+    if (state.phase == ANCHOR_DODONGO_DEAD) {
+        this->health = 0;
+        BossDodongo_SetupDeathCutscene(this);
+        Enemy_StartFinishingBlow(play, actor);
+        return false;
+    }
+
+    if (this->actionFunc != sAnchorBossActions[state.phase]) {
+        this->anchorSentHit = false;
+        this->anchorSentSwallow = false;
+        if (state.phase == ANCHOR_DODONGO_SWALLOWED) {
+            Audio_PlayActorSound2(actor, NA_SE_EN_DODO_K_DRINK);
+        } else if (state.phase == ANCHOR_DODONGO_FALL || state.phase == ANCHOR_DODONGO_DAMAGED) {
+            Audio_PlayActorSound2(actor, NA_SE_EN_DODO_K_DAMAGE);
+        }
+    }
+    this->actionFunc = sAnchorBossActions[state.phase];
+    this->unk_1DA = state.timer;
+    this->unk_1AC = state.inhaleTime;
+    this->unk_1AE = state.fireTime;
+    this->numWallCollisions = state.wallHits;
+    this->unk_1C4 = state.rollAngle;
+    this->unk_1F8 = state.bodyStretch;
+    this->unk_228 = actor->shape.yOffset = state.yOffset;
+    this->unk_1E2 = state.phase == ANCHOR_DODONGO_INHALE;
+
+    void* animation = sAnchorBossAnimations[state.animation];
+    if (this->skelAnime.animation != animation || this->skelAnime.mode != state.animationMode) {
+        Animation_Change(&this->skelAnime, animation, state.animationSpeed, state.animationStart, state.animationEnd,
+                         state.animationMode, 0.0f);
+    }
+    this->skelAnime.curFrame = state.frame;
+    this->skelAnime.playSpeed = 0.0f;
+    SkelAnime_Update(&this->skelAnime);
+    this->skelAnime.playSpeed = state.animationSpeed;
+
+    if (state.phase == ANCHOR_DODONGO_FIRE && state.frame > 17.0f && state.frame < 35.0f) {
+        BossDodongo_SpawnFire(this, play, state.fireTime);
+    }
+    if (state.phase == ANCHOR_DODONGO_INHALE && state.inhaleTime > 20 && state.inhaleTime < 82 &&
+        !this->anchorSentSwallow && BossDodongo_AteExplosive(this, play)) {
+        this->anchorSentSwallow = true;
+        GameInteractor_ExecuteOnEnemyDamage(actor, 0, GI_ENEMY_HIT_DODONGO_SWALLOW);
+    }
+    return true;
+}
+
 void BossDodongo_Update(Actor* thisx, PlayState* play2) {
     PlayState* play = play2;
     BossDodongo* this = (BossDodongo*)thisx;
@@ -1044,12 +1187,17 @@ void BossDodongo_Update(Actor* thisx, PlayState* play2) {
     BossDodongo_PlayerYawCheck(this, play);
     BossDodongo_PlayerPosCheck(this, play);
 
-    this->actionFunc(this, play);
+    this->anchorFollowing = BossDodongo_UpdateAnchor(this, play);
+    if (!this->anchorFollowing) {
+        this->actionFunc(this, play);
+    }
 
     thisx->shape.rot.y = thisx->world.rot.y;
 
     Math_SmoothStepToF(&thisx->shape.yOffset, this->unk_228, 1.0f, 100.0f, 0.0f);
-    Actor_MoveXZGravity(thisx);
+    if (!this->anchorFollowing) {
+        Actor_MoveXZGravity(thisx);
+    }
     BossDodongo_UpdateDamage(this, play);
     Actor_UpdateBgCheckInfo(play, thisx, 10.0f, 10.0f, 20.0f, 4);
     Math_SmoothStepToF(&this->unk_208, 0, 1, 0.001f, 0.0);
@@ -1496,6 +1644,9 @@ void BossDodongo_UpdateDamage(BossDodongo* this, PlayState* play) {
 
                     if ((item2->toucher.dmgFlags & 0x10) || (item2->toucher.dmgFlags & 4)) {
                         this->collider.elements[i].info.bumperFlags &= ~2;
+                        if (this->anchorFollowing) {
+                            continue;
+                        }
                         this->unk_1C0 = 2;
                         BossDodongo_SetupWalk(this);
                         this->unk_1DA = 0x32;
@@ -1512,6 +1663,13 @@ void BossDodongo_UpdateDamage(BossDodongo* this, PlayState* play) {
                 swordDamage = damage = CollisionCheck_GetSwordDamage(item1->toucher.dmgFlags, play);
 
                 if (damage != 0) {
+                    if (this->anchorFollowing) {
+                        if (!this->anchorSentHit) {
+                            this->anchorSentHit = true;
+                            GameInteractor_ExecuteOnEnemyDamage(&this->actor, swordDamage, GI_ENEMY_HIT_NORMAL);
+                        }
+                        return;
+                    }
                     Audio_PlayActorSound2(&this->actor, NA_SE_EN_DODO_K_DAMAGE);
                     BossDodongo_SetupDamaged(this);
                     this->unk_1C0 = 5;

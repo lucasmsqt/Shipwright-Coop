@@ -97,6 +97,9 @@ typedef struct BossDodongo {
     /* 0x0440 */ ColliderJntSph collider;
     /* 0x0460 */ ColliderJntSphElement items[19];
     /* 0x0920 */ BossDodongoEffect effects[80];
+    u8 anchorFollowing;
+    u8 anchorSentHit;
+    u8 anchorSentSwallow;
 } BossDodongo; // size = 0x1820
 
 #endif

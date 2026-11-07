@@ -21,6 +21,7 @@ extern "C" {
 #include "z64.h"
 }
 #include "soh/Network/Anchor/GohmaSync.h"
+#include "soh/Network/Anchor/DodongoSync.h"
 #include "soh/Network/Anchor/RedeadSync.h"
 #include "soh/Network/Anchor/ScrubShot.h"
 
@@ -173,6 +174,14 @@ class Anchor : public Network {
         Vec3s torso;
     };
     using WorldClockVersion = std::pair<uint32_t, uint32_t>;
+    struct DodongoBombPose {
+        Vec3f position;
+        float scale;
+        float flash;
+        int actorId;
+        bool held;
+        bool exploded;
+    };
     struct WorldPeer {
         int scene = SCENE_ID_MAX;
         int room = -1;
@@ -196,6 +205,10 @@ class Anchor : public Network {
         std::optional<GohmaTeamState> gohma;
         std::optional<std::map<int, StalchildSample>> stalchildren;
         std::optional<GallerySample> gallery;
+        std::map<int, AnchorDodongoPlatform> dodongoPlatforms;
+        std::map<int, AnchorBeamosBeam> beamosBeams;
+        std::map<uint32_t, DodongoBombPose> dodongoBombs;
+        std::optional<AnchorDodongoBoss> dodongoBoss;
 
         NpcArea GetArea() const { return { scene, room, age, masterQuest }; }
     };
@@ -230,6 +243,7 @@ class Anchor : public Network {
     uint64_t combatVisit = 0;
     uint32_t scrubShotSerial = 0;
     uint32_t playerArrowSerial = 0;
+    uint32_t dodongoBombSerial = 0;
     struct EnemyHit {
         uint32_t sender;
         NpcArea area;
@@ -277,7 +291,7 @@ class Anchor : public Network {
     void AddEnemyPoseSnapshot(nlohmann::json& payload);
     void ReadEnemyPoseSnapshot(const nlohmann::json& payload, WorldPeer& peer);
     bool IsScrubShotPeer(uint32_t id, const WorldPeer& peer);
-    uint32_t FindScrubController(Actor* scrub);
+    uint32_t FindNearestCombatController(Actor* actor);
     void SendPacket_EnemyDamage(Actor* actor, int32_t damage, int32_t reaction);
     void ConsumeSharedEnemyDamage(Actor* actor, int32_t* damage, int32_t* reaction, PosRot* pose);
     void QueueEnemyDamage(const EnemyKey& key, int32_t damage, int32_t reaction, EnemyDamageOrigin origin,
@@ -285,7 +299,7 @@ class Anchor : public Network {
     void AddEnemyDamageSnapshot(nlohmann::json& payload);
     void ReadEnemyDamageSnapshot(const nlohmann::json& payload);
     uint32_t GetNpcCoordinator() const;
-    uint32_t ChooseNpcAuthority(const NpcArea& area) const;
+    uint32_t ChooseNpcAuthority(const NpcArea& area, bool requireNpcSync = true) const;
     void ApplyTeamNpcPositions();
     void ApplyTeamNpcGaze();
     void AddNpcGazeSnapshot(nlohmann::json& payload);
@@ -300,6 +314,9 @@ class Anchor : public Network {
     void UpdateRoomObjects();
     void AddRoomObjectSnapshot(nlohmann::json& payload);
     void ReadRoomObjectSnapshot(const nlohmann::json& payload, WorldPeer& peer);
+    void AddDodongoSnapshot(nlohmann::json& payload);
+    void ReadDodongoSnapshot(const nlohmann::json& payload, WorldPeer& peer);
+    void SpawnDodongoBombReplicas(uint32_t sender, const WorldPeer& peer);
     void MergeRoomObject(const RoomObjectKey& key, const RoomObjectState& state);
     void PublishRoomObject(const RoomObjectKey& key, const Vec3f& position, int phase, int detail);
     void ApplyTreeSkulltulas();
@@ -418,6 +435,14 @@ class Anchor : public Network {
     bool ShouldSpawnScrubShot(Actor* scrub);
     bool ApplyScrubPose(Actor* actor, ScrubMotion* motion);
     void SendRoomObject(Actor* actor, int phase, int detail);
+    void RecordDodongoEye(Actor* actor, int eye);
+    int GetDodongoEyes(Actor* actor);
+    void MarkDodongoBomb(Actor* actor);
+    void RefreshBeamosBeam();
+    bool UpdateDodongoBombReplica(Actor* actor, PlayState* play, float* flash);
+    bool ReadDodongoPlatform(Actor* actor, AnchorDodongoPlatform* motion, u64* seen);
+    bool ReadBeamosBeam(Actor* actor, AnchorBeamosBeam* beam);
+    bool ReadDodongoBoss(Actor* actor, AnchorDodongoBoss* state);
     int ReadRoomObject(Actor* actor, Vec3f* position, s32* detail, u64* seen);
     void HandlePacket_RoomObject(const nlohmann::json& payload);
     bool ShouldUpdateSharedScrub(Actor* actor);

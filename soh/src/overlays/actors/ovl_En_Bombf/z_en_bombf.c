@@ -7,6 +7,7 @@
 #include "z_en_bombf.h"
 #include "objects/object_bombf/object_bombf.h"
 #include "overlays/effects/ovl_Effect_Ss_Dead_Sound/z_eff_ss_dead_sound.h"
+#include "soh/Network/Anchor/RoomObjects.h"
 
 #define FLAGS (ACTOR_FLAG_ATTENTION_ENABLED | ACTOR_FLAG_UPDATE_CULLING_DISABLED)
 
@@ -116,7 +117,9 @@ void EnBombf_Init(Actor* thisx, PlayState* play) {
         this->timer = 140;
         this->flashSpeedScale = 15;
         thisx->gravity = -1.5f;
-        Actor_ChangeCategory(play, &play->actorCtx, thisx, ACTORCAT_EXPLOSIVE);
+        if (this->anchorBomb.owner == 0) {
+            Actor_ChangeCategory(play, &play->actorCtx, thisx, ACTORCAT_EXPLOSIVE);
+        }
         thisx->colChkInfo.mass = 200;
         thisx->flags &= ~ACTOR_FLAG_ATTENTION_ENABLED;
         EnBombf_SetupAction(this, EnBombf_Move);
@@ -142,12 +145,31 @@ void EnBombf_SetupGrowBomb(EnBombf* this, s16 params) {
     EnBombf_SetupAction(this, EnBombf_GrowBomb);
 }
 
+static void EnBombf_DepletePlant(EnBombf* this, EnBombf* bomb, PlayState* play) {
+    this->timer = 180;
+    this->flowerBombScale = 0.0f;
+    this->actor.flags &= ~ACTOR_FLAG_ATTENTION_ENABLED;
+    if (play->sceneNum == SCENE_DODONGOS_CAVERN || play->sceneNum == SCENE_DODONGOS_CAVERN_BOSS) {
+        Anchor_MarkDodongoBomb(&bomb->actor);
+        Anchor_SendRoomObject(&this->actor, ANCHOR_BOMB_FLOWER_PLUCKED, this->timer);
+    }
+}
+
 void EnBombf_GrowBomb(EnBombf* this, PlayState* play) {
     EnBombf* bombFlower;
     s32 pad;
     s32 pad1;
     Player* player = GET_PLAYER(play);
     s32 pad2;
+    Vec3f sharedPosition;
+    s32 sharedTimer;
+
+    if (Anchor_ReadRoomObject(&this->actor, &sharedPosition, &sharedTimer, &this->anchorFlowerSeen) ==
+        ANCHOR_BOMB_FLOWER_PLUCKED) {
+        this->timer = CLAMP_MIN(sharedTimer, 0);
+        this->flowerBombScale = CLAMP(-sharedTimer * 0.05f, 0.0f, 1.0f);
+        this->actor.flags &= ~ACTOR_FLAG_ATTENTION_ENABLED;
+    }
 
     if (this->flowerBombScale >= 1.0f) {
         if (Actor_HasParent(&this->actor, play)) {
@@ -155,10 +177,8 @@ void EnBombf_GrowBomb(EnBombf* this, PlayState* play) {
                                                this->actor.world.pos.y, this->actor.world.pos.z, 0, 0, 0, 0);
             if (bombFlower != NULL) {
                 func_8002F5C4(&this->actor, &bombFlower->actor, play);
-                this->timer = 180;
-                this->flowerBombScale = 0.0f;
+                EnBombf_DepletePlant(this, bombFlower, play);
                 Audio_PlayActorSound2(&this->actor, NA_SE_PL_PULL_UP_ROCK);
-                this->actor.flags &= ~ACTOR_FLAG_ATTENTION_ENABLED;
             } else {
                 player->actor.child = NULL;
                 player->heldActor = NULL;
@@ -175,9 +195,7 @@ void EnBombf_GrowBomb(EnBombf* this, PlayState* play) {
                 if (bombFlower != NULL) {
                     bombFlower->isFuseEnabled = 1;
                     bombFlower->timer = 0;
-                    this->timer = 180;
-                    this->actor.flags &= ~ACTOR_FLAG_ATTENTION_ENABLED;
-                    this->flowerBombScale = 0.0f;
+                    EnBombf_DepletePlant(this, bombFlower, play);
                 }
             }
         } else {
@@ -186,9 +204,7 @@ void EnBombf_GrowBomb(EnBombf* this, PlayState* play) {
                                                    this->actor.world.pos.y, this->actor.world.pos.z, 0, 0, 0, 0);
                 if (bombFlower != NULL) {
                     bombFlower->timer = 100;
-                    this->timer = 180;
-                    this->actor.flags &= ~ACTOR_FLAG_ATTENTION_ENABLED;
-                    this->flowerBombScale = 0.0f;
+                    EnBombf_DepletePlant(this, bombFlower, play);
                 }
             } else {
                 if (!Actor_HasParent(&this->actor, play)) {
@@ -320,6 +336,10 @@ void EnBombf_Update(Actor* thisx, PlayState* play) {
     Color_RGBA8 dustColor = { 255, 255, 255, 255 };
     s32 pad[2];
     EnBombf* this = (EnBombf*)thisx;
+
+    if (Anchor_UpdateDodongoBombReplica(thisx, play, &this->flashIntensity)) {
+        return;
+    }
 
     if ((this->isFuseEnabled != 0) && (this->timer != 0)) {
         this->timer--;

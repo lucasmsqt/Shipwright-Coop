@@ -30,6 +30,7 @@ typedef struct EnVm {
     /* 0x0268 */ ColliderCylinder colliderCylinder;
     /* 0x02B4 */ ColliderQuad colliderQuad1;
     /* 0x0334 */ ColliderQuad colliderQuad2;
+    u8 anchorSharedBeam;
 } EnVm; // size = 0x03B4
 
 typedef enum {
