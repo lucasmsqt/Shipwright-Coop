@@ -123,16 +123,8 @@ bool Anchor::ReadGohmaState(Actor* actor, GohmaTeamState* state, u64* seen) {
     return true;
 }
 
-bool Anchor::UseSharedGohmaPortal() {
-    return CanFollowGohmaWarp() && gPlayState->sceneNum == SCENE_DEKU_TREE_BOSS;
-}
-
 extern "C" s32 Anchor_ReadGohmaState(Actor* actor, GohmaTeamState* state, u64* seen) {
     return Anchor::Instance != nullptr && Anchor::Instance->ReadGohmaState(actor, state, seen);
-}
-
-extern "C" s32 Anchor_UseSharedGohmaPortal() {
-    return Anchor::Instance != nullptr && Anchor::Instance->UseSharedGohmaPortal();
 }
 
 extern "C" u32 Anchor_GetGohmaChildDefeats(const GohmaTeamState* state) {

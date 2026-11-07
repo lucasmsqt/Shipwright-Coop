@@ -6,6 +6,7 @@
 #include "overlays/actors/ovl_Door_Warp1/z_door_warp1.h"
 #include "soh/OTRGlobals.h"
 #include "soh/Enhancements/game-interactor/GameInteractor_Hooks.h"
+#include "soh/Network/Anchor/BossWarp.h"
 #include "soh/Network/Anchor/GohmaSync.h"
 #include <libultraship/bridge/consolevariablebridge.h>
 
@@ -345,7 +346,7 @@ void BossGoma_Init(Actor* thisx, PlayState* play) {
     if (Flags_GetClear(play, play->roomCtx.curRoom.num)) {
         Actor_Kill(&this->actor);
         if (GameInteractor_Should(VB_SPAWN_BLUE_WARP, true, this)) {
-            bool sharedPortal = Anchor_UseSharedGohmaPortal();
+            bool sharedPortal = Anchor_UseSharedBossPortal();
             Actor_SpawnAsChild(&play->actorCtx, &this->actor, play, ACTOR_DOOR_WARP1, sharedPortal ? -150.0f : 0.0f,
                                -640.0f, sharedPortal ? -350.0f : 0.0f, 0, 0, 0, WARP_DUNGEON_CHILD);
         }
@@ -1148,7 +1149,7 @@ void BossGoma_Defeated(BossGoma* this, PlayState* play) {
                 this->timer = 30;
                 this->actionState = 3;
 
-                bool sharedPortal = Anchor_UseSharedGohmaPortal();
+                bool sharedPortal = Anchor_UseSharedBossPortal();
                 for (i = 0; !sharedPortal && i < 10000; i++) {
                     if ((fabsf(childPos.x - player->actor.world.pos.x) < 100.0f &&
                          fabsf(childPos.z - player->actor.world.pos.z) < 100.0f) ||

@@ -58,7 +58,7 @@ typedef struct DoorWarp1 {
     /* 0x01D8 */ LightNode* lowerLight;
     /* 0x01DC */ LightInfo lowerLightInfo;
     /* 0x01EC */ s32 rutoWarpState; // for state communication with En_Ru1 using DoorWarp1RutoState values
-    s8 sharedGohmaStory;
+    s8 sharedBossStory;
 } DoorWarp1;
 
 #endif

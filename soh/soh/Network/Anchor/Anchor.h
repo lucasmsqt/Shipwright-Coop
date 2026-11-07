@@ -114,7 +114,7 @@ class Anchor : public Network {
     std::deque<TeamCutsceneInput> teamCutsceneInputs;
     std::tuple<uint32_t, int, int, bool> lastCutsceneInput{};
     unsigned int playedTeamCutscenes = 0;
-    bool gohmaWarpCommitted = false;
+    bool bossWarpCommitted = false;
     std::chrono::steady_clock::time_point teamCutsceneDeadline;
     using NpcArea = std::tuple<int, int, int, bool>;
     using EnemyKey = std::array<int, 4>;
@@ -254,7 +254,7 @@ class Anchor : public Network {
     bool CanShareCutscenes();
     bool CanShareTombCutscenes(bool requirePlayer = true);
     bool CanUseTeamCutscene(int id);
-    bool CanFollowGohmaWarp();
+    bool CanFollowBossWarp();
     void AnnounceTeamCutscene(int id);
     void OnScriptedCutsceneStart();
     bool IsInTeamScriptRoom() const;
@@ -427,10 +427,10 @@ class Anchor : public Network {
     int ConsumeSunStun(Actor* actor, u64* seen);
     bool ReadGohmaState(Actor* actor, GohmaTeamState* state, u64* seen);
     uint32_t GetGohmaChildDefeats(const GohmaTeamState* state);
-    bool UseSharedGohmaPortal();
-    int GetGohmaWarpRequest();
-    void StartGohmaWarp(bool story);
-    void CommitGohmaWarp();
+    bool UseSharedBossPortal();
+    int GetBossWarpRequest();
+    int StartBossWarp(bool story);
+    int CommitBossWarp();
     void StartZeldaMeeting(PlayState* play);
     void FinishZeldaMeeting();
     bool ForceSunSongPartTwo(PlayState* play);

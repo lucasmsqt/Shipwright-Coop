@@ -55,10 +55,6 @@ extern "C" {
 void BossGoma_GetTeamState(const struct BossGoma* boss, GohmaTeamState* state);
 s32 Anchor_ReadGohmaState(struct Actor* actor, GohmaTeamState* state, u64* seen);
 u32 Anchor_GetGohmaChildDefeats(const GohmaTeamState* state);
-s32 Anchor_UseSharedGohmaPortal(void);
-s32 Anchor_GetGohmaWarpRequest(void);
-void Anchor_StartGohmaWarp(s32 story);
-void Anchor_CommitGohmaWarp(void);
 
 #ifdef __cplusplus
 }

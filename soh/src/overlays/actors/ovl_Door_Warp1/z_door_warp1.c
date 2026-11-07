@@ -1,5 +1,5 @@
 #include "z_door_warp1.h"
-#include "soh/Network/Anchor/GohmaSync.h"
+#include "soh/Network/Anchor/BossWarp.h"
 #include "objects/object_warp1/object_warp1.h"
 #include "soh/Enhancements/randomizer/randomizer_entrance.h"
 #include "soh/Enhancements/game-interactor/GameInteractor_Hooks.h"
@@ -483,22 +483,24 @@ s32 DoorWarp1_PlayerInRange(DoorWarp1* this, PlayState* play) {
 
 void DoorWarp1_ChildWarpIdle(DoorWarp1* this, PlayState* play) {
     Player* player;
-    bool sharedGohma = Anchor_UseSharedGohmaPortal();
-    s32 request = sharedGohma ? Anchor_GetGohmaWarpRequest() : -1;
+    bool sharedBossWarp = Anchor_UseSharedBossPortal();
+    s32 request = sharedBossWarp ? Anchor_GetBossWarpRequest() : -1;
 
     Audio_PlayActorSound2(&this->actor, NA_SE_EV_WARP_HOLE - SFX_FLAG);
 
     if (request >= 0 || DoorWarp1_PlayerInRange(this, play)) {
         player = GET_PLAYER(play);
-        this->sharedGohmaStory = -1;
+        this->sharedBossStory = -1;
         if (request >= 0) {
-            this->sharedGohmaStory = request;
+            this->sharedBossStory = request;
             player->actor.world.pos = this->actor.world.pos;
             player->actor.velocity.y = 0.0f;
             player->actor.speedXZ = 0.0f;
-        } else if (sharedGohma) {
-            this->sharedGohmaStory = !Flags_GetEventChkInf(EVENTCHKINF_OBTAINED_KOKIRI_EMERALD_DEKU_TREE_DEAD);
-            Anchor_StartGohmaWarp(this->sharedGohmaStory);
+        } else if (sharedBossWarp) {
+            s16 storyFlag = play->sceneNum == SCENE_DODONGOS_CAVERN_BOSS
+                                ? EVENTCHKINF_USED_DODONGOS_CAVERN_BLUE_WARP
+                                : EVENTCHKINF_OBTAINED_KOKIRI_EMERALD_DEKU_TREE_DEAD;
+            this->sharedBossStory = Anchor_StartBossWarp(!Flags_GetEventChkInf(storyFlag));
         }
 
         Audio_PlaySfxGeneral(NA_SE_EV_LINK_WARP, &player->actor.projectedPos, 4, &gSfxDefaultFreqAndVolScale,
@@ -533,39 +535,32 @@ void DoorWarp1_ChildWarpOut(DoorWarp1* this, PlayState* play) {
         osSyncPrintf("\n\n\nじかんがきたからおーしまい fade_direction=[%d]", play->transitionTrigger,
                      TRANS_TRIGGER_START);
 
-        if (play->sceneNum == SCENE_DODONGOS_CAVERN_BOSS) {
-            if (GameInteractor_Should(VB_PLAY_BLUE_WARP_CS,
-                                      !Flags_GetEventChkInf(EVENTCHKINF_USED_DODONGOS_CAVERN_BLUE_WARP),
-                                      EVENTCHKINF_USED_DODONGOS_CAVERN_BLUE_WARP)) {
-                Flags_SetEventChkInf(EVENTCHKINF_USED_DODONGOS_CAVERN_BLUE_WARP);
-                if (GameInteractor_Should(VB_GIVE_ITEM_FROM_BLUE_WARP, true, ITEM_GORON_RUBY)) {
-                    Item_Give(play, ITEM_GORON_RUBY);
-                }
-                play->nextEntranceIndex = ENTR_DEATH_MOUNTAIN_TRAIL_BOTTOM_EXIT;
-                gSaveContext.nextCutsceneIndex = 0xFFF1;
-            } else {
-                play->nextEntranceIndex = ENTR_DEATH_MOUNTAIN_TRAIL_DODONGO_BLUE_WARP;
-                gSaveContext.nextCutsceneIndex = 0;
-            }
-        } else if (play->sceneNum == SCENE_DEKU_TREE_BOSS) {
-            bool story = this->sharedGohmaStory >= 0 ? this->sharedGohmaStory :
-                         !Flags_GetEventChkInf(EVENTCHKINF_OBTAINED_KOKIRI_EMERALD_DEKU_TREE_DEAD);
-            bool playStory = GameInteractor_Should(VB_PLAY_BLUE_WARP_CS, story,
-                                                   EVENTCHKINF_OBTAINED_KOKIRI_EMERALD_DEKU_TREE_DEAD);
-            if (this->sharedGohmaStory >= 0) {
-                Anchor_CommitGohmaWarp();
+        if (play->sceneNum == SCENE_DODONGOS_CAVERN_BOSS || play->sceneNum == SCENE_DEKU_TREE_BOSS) {
+            const bool dodongo = play->sceneNum == SCENE_DODONGOS_CAVERN_BOSS;
+            const s16 storyFlag = dodongo ? EVENTCHKINF_USED_DODONGOS_CAVERN_BLUE_WARP
+                                         : EVENTCHKINF_OBTAINED_KOKIRI_EMERALD_DEKU_TREE_DEAD;
+            const u8 reward = dodongo ? ITEM_GORON_RUBY : ITEM_KOKIRI_EMERALD;
+            const s32 sharedStory = this->sharedBossStory >= 0 ? Anchor_CommitBossWarp() : -1;
+            const s32 warpStory = sharedStory >= 0 ? sharedStory : this->sharedBossStory;
+            const bool story = warpStory >= 0 ? warpStory : !Flags_GetEventChkInf(storyFlag);
+            bool playStory = GameInteractor_Should(VB_PLAY_BLUE_WARP_CS, story, storyFlag);
+            if (this->sharedBossStory >= 0) {
                 playStory = story;
             }
             if (playStory) {
-                Flags_SetEventChkInf(EVENTCHKINF_OBTAINED_KOKIRI_EMERALD_DEKU_TREE_DEAD);
-                Flags_SetEventChkInf(EVENTCHKINF_USED_DEKU_TREE_BLUE_WARP);
-                if (GameInteractor_Should(VB_GIVE_ITEM_FROM_BLUE_WARP, true, ITEM_KOKIRI_EMERALD)) {
-                    Item_Give(play, ITEM_KOKIRI_EMERALD);
+                Flags_SetEventChkInf(storyFlag);
+                if (!dodongo) {
+                    Flags_SetEventChkInf(EVENTCHKINF_USED_DEKU_TREE_BLUE_WARP);
                 }
-                play->nextEntranceIndex = ENTR_KOKIRI_FOREST_0;
+                if ((warpStory < 0 || !dodongo || !CHECK_QUEST_ITEM(QUEST_GORON_RUBY)) &&
+                    GameInteractor_Should(VB_GIVE_ITEM_FROM_BLUE_WARP, true, reward)) {
+                    Item_Give(play, reward);
+                }
+                play->nextEntranceIndex = dodongo ? ENTR_DEATH_MOUNTAIN_TRAIL_BOTTOM_EXIT : ENTR_KOKIRI_FOREST_0;
                 gSaveContext.nextCutsceneIndex = 0xFFF1;
             } else {
-                play->nextEntranceIndex = ENTR_KOKIRI_FOREST_DEKU_TREE_BLUE_WARP;
+                play->nextEntranceIndex = dodongo ? ENTR_DEATH_MOUNTAIN_TRAIL_DODONGO_BLUE_WARP
+                                                  : ENTR_KOKIRI_FOREST_DEKU_TREE_BLUE_WARP;
                 gSaveContext.nextCutsceneIndex = 0;
             }
         } else if (play->sceneNum == SCENE_JABU_JABU_BOSS) {

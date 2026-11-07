@@ -1,4 +1,5 @@
 #include "soh/Network/Anchor/Anchor.h"
+#include "soh/Network/Anchor/BossWarp.h"
 #include "soh/Enhancements/game-interactor/GameInteractor.h"
 #include "soh/Enhancements/game-interactor/GameInteractor_Hooks.h"
 #include "soh/ResourceManagerHelpers.h"
@@ -23,7 +24,8 @@ extern CutsceneData D_808BD2A0[];
 namespace {
 enum CutsceneId {
     SARIA_BRIDGE, ZELDA_ESCAPE, DEKU_TREE_MEETING, DEKU_TREE_QUESTION, DEKU_TREE_ENTRANCE, GOHMA_EXIT_STORY,
-    GOHMA_EXIT_RETURN, ZELDA_MEETING, ROYAL_TOMB_OPENING, SUN_SONG_LESSON, ROOM_SCRIPTED,
+    GOHMA_EXIT_RETURN, ZELDA_MEETING, ROYAL_TOMB_OPENING, SUN_SONG_LESSON, ROOM_SCRIPTED, RESERVED_SARIA_GREETING,
+    DODONGO_EXIT_STORY, DODONGO_EXIT_RETURN,
 };
 
 struct TeamCutscene {
@@ -48,10 +50,32 @@ constexpr TeamCutscene teamCutscenes[] = {
     { ENTR_CASTLE_COURTYARD_ZELDA_0, SCENE_CASTLE_COURTYARD_ZELDA, 0, { -1, -1 } },
     { ENTR_GRAVEYARD_ENTRANCE, SCENE_GRAVEYARD, 0xFFFD, { EVENTCHKINF_DESTROYED_ROYAL_FAMILY_TOMB, -1 } },
     { ENTR_ROYAL_FAMILYS_TOMB_0, SCENE_ROYAL_FAMILYS_TOMB, 0xFFFD, { -1, -1 } },
+    { -1, SCENE_ID_MAX, 0, { -1, -1 } }, // ROOM_SCRIPTED uses the sender's scene and script.
+    { -1, SCENE_ID_MAX, 0, { -1, -1 } }, // Reserved for the Saria greeting packet.
+    { ENTR_DEATH_MOUNTAIN_TRAIL_BOTTOM_EXIT, SCENE_DEATH_MOUNTAIN_TRAIL, 0xFFF1,
+      { EVENTCHKINF_USED_DODONGOS_CAVERN_BLUE_WARP, -1 } },
+    { ENTR_DEATH_MOUNTAIN_TRAIL_DODONGO_BLUE_WARP, SCENE_DEATH_MOUNTAIN_TRAIL, 0, { -1, -1 } },
 };
 
-bool IsGohmaWarp(int id) {
-    return id == GOHMA_EXIT_STORY || id == GOHMA_EXIT_RETURN;
+int GetBossWarpScene(int id) {
+    switch (id) {
+        case GOHMA_EXIT_STORY:
+        case GOHMA_EXIT_RETURN:
+            return SCENE_DEKU_TREE_BOSS;
+        case DODONGO_EXIT_STORY:
+        case DODONGO_EXIT_RETURN:
+            return SCENE_DODONGOS_CAVERN_BOSS;
+        default:
+            return SCENE_ID_MAX;
+    }
+}
+
+bool IsBossWarp(int id) {
+    return GetBossWarpScene(id) != SCENE_ID_MAX;
+}
+
+bool IsBossWarpStory(int id) {
+    return id == GOHMA_EXIT_STORY || id == DODONGO_EXIT_STORY;
 }
 
 bool IsTombCutscene(int id) {
@@ -128,8 +152,11 @@ bool Anchor::CanShareTombCutscenes(bool requirePlayer) {
 }
 
 bool Anchor::CanUseTeamCutscene(int id) {
-    if (IsGohmaWarp(id)) {
-        return CanFollowGohmaWarp();
+    if (id == RESERVED_SARIA_GREETING) {
+        return false;
+    }
+    if (IsBossWarp(id)) {
+        return CanFollowBossWarp();
     }
     return (IsTombCutscene(id) || id == ROOM_SCRIPTED) ? CanShareTombCutscenes() : CanShareCutscenes();
 }
@@ -140,7 +167,7 @@ bool Anchor::IsInTeamScriptRoom() const {
            (ResourceMgr_IsSceneMasterQuest(teamScriptScene) != 0) == teamScriptMasterQuest;
 }
 
-bool Anchor::CanFollowGohmaWarp() {
+bool Anchor::CanFollowBossWarp() {
     return isConnected && roomState.syncItemsAndFlags && IsSaveLoaded() && LINK_IS_CHILD && !IS_RANDO && !IS_BOSS_RUSH;
 }
 
@@ -220,52 +247,69 @@ extern "C" void Anchor_FinishZeldaMeeting(void) {
     }
 }
 
-void Anchor::StartGohmaWarp(bool story) {
-    if (!CanFollowGohmaWarp() || pendingTeamCutscene >= 0 || activeTeamCutscene >= 0) {
-        return;
+bool Anchor::UseSharedBossPortal() {
+    return CanFollowBossWarp() && (gPlayState->sceneNum == SCENE_DEKU_TREE_BOSS ||
+                                   gPlayState->sceneNum == SCENE_DODONGOS_CAVERN_BOSS);
+}
+
+int Anchor::StartBossWarp(bool story) {
+    if (!UseSharedBossPortal() || activeTeamCutscene >= 0) {
+        return -1;
     }
-    pendingTeamCutscene = story ? GOHMA_EXIT_STORY : GOHMA_EXIT_RETURN;
+    if (pendingTeamCutscene >= 0) {
+        return GetBossWarpScene(pendingTeamCutscene) == gPlayState->sceneNum ? IsBossWarpStory(pendingTeamCutscene) : -1;
+    }
+    if (gPlayState->sceneNum == SCENE_DODONGOS_CAVERN_BOSS) {
+        pendingTeamCutscene = story ? DODONGO_EXIT_STORY : DODONGO_EXIT_RETURN;
+    } else {
+        pendingTeamCutscene = story ? GOHMA_EXIT_STORY : GOHMA_EXIT_RETURN;
+    }
     teamCutsceneDeadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
     AnnounceTeamCutscene(pendingTeamCutscene);
+    return story;
 }
 
-void Anchor::CommitGohmaWarp() {
-    if (!IsGohmaWarp(pendingTeamCutscene) || teamCutsceneLeader != ownClientId || gohmaWarpCommitted) {
-        return;
+int Anchor::CommitBossWarp() {
+    if (!UseSharedBossPortal() || GetBossWarpScene(pendingTeamCutscene) != gPlayState->sceneNum) {
+        return -1;
     }
-    gohmaWarpCommitted = true;
-    nlohmann::json payload = { { "type", TEAM_CUTSCENE },
-                               { "targetTeamId", CVarGetString(CVAR_REMOTE_ANCHOR("TeamId"), "default") },
-                               { "cutscene", pendingTeamCutscene }, { "startedAt", teamCutsceneStartedAt },
-                               { "committed", true } };
-    SendJsonToRemote(payload);
+    if (teamCutsceneLeader == ownClientId && !bossWarpCommitted) {
+        bossWarpCommitted = true;
+        nlohmann::json payload = { { "type", TEAM_CUTSCENE },
+                                   { "targetTeamId", CVarGetString(CVAR_REMOTE_ANCHOR("TeamId"), "default") },
+                                   { "cutscene", pendingTeamCutscene }, { "startedAt", teamCutsceneStartedAt },
+                                   { "committed", true } };
+        SendJsonToRemote(payload);
+    }
+    return IsBossWarpStory(pendingTeamCutscene);
 }
 
-int Anchor::GetGohmaWarpRequest() {
-    if (!IsGohmaWarp(pendingTeamCutscene) || teamCutsceneLeader == ownClientId || !CanFollowGohmaWarp() ||
+int Anchor::GetBossWarpRequest() {
+    if (!UseSharedBossPortal() || GetBossWarpScene(pendingTeamCutscene) != gPlayState->sceneNum ||
+        teamCutsceneLeader == ownClientId ||
         !IsSharedTeamMember(teamCutsceneLeader) || gSaveContext.health <= 0 || Play_IsLivePause(gPlayState) ||
         Play_InCsMode(gPlayState) || gPlayState->transitionTrigger != TRANS_TRIGGER_OFF ||
         gPlayState->transitionMode != TRANS_MODE_OFF || gSaveContext.nextCutsceneIndex != 0xFFEF ||
         !GameInteractor::IsPlayerInControl()) {
         return -1;
     }
-    return pendingTeamCutscene == GOHMA_EXIT_STORY;
+    return IsBossWarpStory(pendingTeamCutscene);
 }
 
-extern "C" void Anchor_StartGohmaWarp(s32 story) {
-    if (Anchor::Instance != nullptr) {
-        Anchor::Instance->StartGohmaWarp(story != 0);
-    }
+extern "C" s32 Anchor_UseSharedBossPortal(void) {
+    return Anchor::Instance != nullptr && Anchor::Instance->UseSharedBossPortal();
 }
 
-extern "C" s32 Anchor_GetGohmaWarpRequest(void) {
-    return Anchor::Instance == nullptr ? -1 : Anchor::Instance->GetGohmaWarpRequest();
+extern "C" s32 Anchor_StartBossWarp(s32 story) {
+    return Anchor::Instance == nullptr ? -1 : Anchor::Instance->StartBossWarp(story != 0);
 }
 
-extern "C" void Anchor_CommitGohmaWarp(void) {
-    if (Anchor::Instance != nullptr) {
-        Anchor::Instance->CommitGohmaWarp();
-    }
+extern "C" s32 Anchor_GetBossWarpRequest(void) {
+    return Anchor::Instance == nullptr ? -1 : Anchor::Instance->GetBossWarpRequest();
+}
+
+extern "C" s32 Anchor_CommitBossWarp(void) {
+    return Anchor::Instance == nullptr ? -1 : Anchor::Instance->CommitBossWarp();
 }
 
 void Anchor::ResetTeamCutscene() {
@@ -281,21 +325,21 @@ void Anchor::ResetTeamCutscene() {
     teamCutsceneInputReady = {};
     teamCutsceneInputs.clear();
     lastCutsceneInput = {};
-    gohmaWarpCommitted = false;
+    bossWarpCommitted = false;
 }
 
 void Anchor::OnScriptedCutsceneStart() {
     if (activeTeamCutscene == ZELDA_MEETING || activeTeamCutscene == SUN_SONG_LESSON) {
         return;
     }
-    const bool gohma = IsGohmaWarp(pendingTeamCutscene) && CanFollowGohmaWarp();
-    if (!gohma && !CanShareTombCutscenes()) {
+    const bool bossWarp = IsBossWarp(pendingTeamCutscene) && CanFollowBossWarp();
+    if (!bossWarp && !CanShareTombCutscenes()) {
         return;
     }
 
     for (int id = 0; id < ARRAY_COUNT(teamCutscenes); ++id) {
-        if (id == ZELDA_MEETING || id == GOHMA_EXIT_RETURN || !CanUseTeamCutscene(id) ||
-            (gohma ? id != GOHMA_EXIT_STORY : IsGohmaWarp(id)) ||
+        if (id == ZELDA_MEETING || id == ROOM_SCRIPTED || !CanUseTeamCutscene(id) ||
+            (bossWarp ? (id != pendingTeamCutscene || !IsBossWarpStory(id)) : IsBossWarp(id)) ||
             !IsCurrentCutscene(id)) {
             continue;
         }
@@ -356,7 +400,7 @@ void Anchor::HandlePacket_TeamCutscene(nlohmann::json payload) {
     const auto id = payload.at("cutscene").get<int>();
     const auto leader = payload.at("clientId").get<uint32_t>();
     const auto startedAt = payload.value("startedAt", int64_t{ 0 });
-    if (id < 0 || id > ROOM_SCRIPTED || !CanUseTeamCutscene(id) || !IsSharedTeamMember(leader) ||
+    if (id < 0 || id >= ARRAY_COUNT(teamCutscenes) || !CanUseTeamCutscene(id) || !IsSharedTeamMember(leader) ||
         startedAt <= 0) {
         return;
     }
@@ -376,23 +420,30 @@ void Anchor::HandlePacket_TeamCutscene(nlohmann::json payload) {
         }
     }
     const int current = activeTeamCutscene >= 0 ? activeTeamCutscene : pendingTeamCutscene;
-    const bool committed = IsGohmaWarp(id) && payload.value("committed", false);
+    const bool committed = IsBossWarp(id) && payload.value("committed", false);
     if (committed && current == id && leader == teamCutsceneLeader && startedAt == teamCutsceneStartedAt) {
-        gohmaWarpCommitted = true;
+        bossWarpCommitted = true;
         return;
     }
     if (current >= 0) {
-        if (current != id || (id == ROOM_SCRIPTED && (teamScriptAsset != asset || !IsInTeamScriptRoom())) ||
+        const bool samePendingWarp = activeTeamCutscene < 0 && IsBossWarp(id) &&
+                                     GetBossWarpScene(current) == GetBossWarpScene(id);
+        if ((current != id && !samePendingWarp) ||
+            (id == ROOM_SCRIPTED && (teamScriptAsset != asset || !IsInTeamScriptRoom())) ||
             std::make_pair(startedAt, leader) >= std::make_pair(teamCutsceneStartedAt, teamCutsceneLeader)) {
             return;
         }
         teamCutsceneLeader = leader;
         teamCutsceneStartedAt = startedAt;
+        if (samePendingWarp) {
+            pendingTeamCutscene = id;
+            bossWarpCommitted = committed;
+        }
         teamCutsceneInputs.clear();
         lastCutsceneInput = {};
         return;
     }
-    if (id != DEKU_TREE_QUESTION && !IsGohmaWarp(id) && (playedTeamCutscenes & (1u << id))) {
+    if (id != DEKU_TREE_QUESTION && !IsBossWarp(id) && (playedTeamCutscenes & (1u << id))) {
         return;
     }
 
@@ -406,7 +457,7 @@ void Anchor::HandlePacket_TeamCutscene(nlohmann::json payload) {
         teamScriptMasterQuest = ResourceMgr_IsSceneMasterQuest(teamScriptScene) != 0;
         teamScriptAsset = std::move(asset);
     }
-    gohmaWarpCommitted = committed;
+    bossWarpCommitted = committed;
     teamCutsceneLeader = leader;
     teamCutsceneStartedAt = startedAt;
     teamCutsceneDeadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
@@ -505,7 +556,7 @@ void Anchor::FollowPendingTeamCutscene() {
     if (pendingTeamCutscene < 0) {
         return;
     }
-    const bool gohma = IsGohmaWarp(pendingTeamCutscene);
+    const bool bossWarp = IsBossWarp(pendingTeamCutscene);
     if (!CanUseTeamCutscene(pendingTeamCutscene) ||
         (teamCutsceneLeader != ownClientId && !IsSharedTeamMember(teamCutsceneLeader)) ||
         (pendingTeamCutscene == ROOM_SCRIPTED && !IsInTeamScriptRoom()) ||
@@ -566,18 +617,27 @@ void Anchor::FollowPendingTeamCutscene() {
         ResetTeamCutscene();
         return;
     }
-    if (gohma) {
-        if (id == GOHMA_EXIT_RETURN && gPlayState->sceneNum == cutscene.scene &&
-            gSaveContext.entranceIndex == cutscene.entrance) {
+    if (bossWarp) {
+        const bool story = IsBossWarpStory(id);
+        const int returnId = id == GOHMA_EXIT_STORY ? GOHMA_EXIT_RETURN : DODONGO_EXIT_RETURN;
+        const bool skippedStory = story && CVarGetInteger(CVAR_ENHANCEMENT("TimeSavers.SkipCutscene.Story"), 0) &&
+                                  gSaveContext.entranceIndex == teamCutscenes[returnId].entrance;
+        if (gPlayState->sceneNum == cutscene.scene && ((!story && gSaveContext.entranceIndex == cutscene.entrance) ||
+                                                       skippedStory)) {
             ResetTeamCutscene();
-        } else if (teamCutsceneLeader != ownClientId && gohmaWarpCommitted && gPlayState->sceneNum != SCENE_DEKU_TREE_BOSS) {
-            if (id == GOHMA_EXIT_STORY) {
-                GameInteractor_Should(VB_PLAY_BLUE_WARP_CS, true, EVENTCHKINF_OBTAINED_KOKIRI_EMERALD_DEKU_TREE_DEAD);
-                if (GameInteractor_Should(VB_GIVE_ITEM_FROM_BLUE_WARP, true, ITEM_KOKIRI_EMERALD)) {
-                    Item_Give(gPlayState, ITEM_KOKIRI_EMERALD);
+        } else if (teamCutsceneLeader != ownClientId && bossWarpCommitted &&
+                   gPlayState->sceneNum != GetBossWarpScene(id)) {
+            if (story) {
+                const int reward = id == DODONGO_EXIT_STORY ? ITEM_GORON_RUBY : ITEM_KOKIRI_EMERALD;
+                GameInteractor_Should(VB_PLAY_BLUE_WARP_CS, true, cutscene.eventFlags[0]);
+                if ((id != DODONGO_EXIT_STORY || !CHECK_QUEST_ITEM(QUEST_GORON_RUBY)) &&
+                    GameInteractor_Should(VB_GIVE_ITEM_FROM_BLUE_WARP, true, reward)) {
+                    Item_Give(gPlayState, reward);
                 }
                 for (s16 flag : cutscene.eventFlags) {
-                    Flags_SetEventChkInf(flag);
+                    if (flag >= 0) {
+                        Flags_SetEventChkInf(flag);
+                    }
                 }
                 gSaveContext.nextCutsceneIndex = cutscene.index;
             }
