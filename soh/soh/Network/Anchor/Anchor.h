@@ -110,8 +110,10 @@ class Anchor : public Network {
         int mode;
         int choice;
         bool skip;
+        int step;
     };
     std::deque<TeamCutsceneInput> teamCutsceneInputs;
+    int teamCutsceneStep = 0;
     std::tuple<uint32_t, int, int, bool> lastCutsceneInput{};
     unsigned int playedTeamCutscenes = 0;
     bool bossWarpCommitted = false;
@@ -260,7 +262,7 @@ class Anchor : public Network {
     bool IsInTeamScriptRoom() const;
     void FollowPendingTeamCutscene();
     void ResetTeamCutscene();
-    void HandleTeamCutsceneInput(PlayState* play, bool skip, bool* should);
+    void HandleTeamCutsceneInput(PlayState* play, bool* should, bool* skipTextbox = nullptr);
     bool CanShareCombat();
     static void MergeInventoryUpgrades(Inventory& inventory, uint32_t local, uint32_t remote);
     void ResetCombatRoom();

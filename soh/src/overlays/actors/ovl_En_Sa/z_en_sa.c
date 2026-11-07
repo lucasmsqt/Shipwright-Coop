@@ -480,6 +480,25 @@ void func_80AF6170(CsCmdActorCue* csAction, Vec3f* dst) {
     dst->z = csAction->endPos.z;
 }
 
+static void EnSa_StartGreeting(EnSa* this, PlayState* play) {
+    this->unk_210 = 0;
+    this->actor.gravity = -1.0f;
+    Cutscene_SetSegment(play, (void*)gSpot04Cs_10E20);
+    gSaveContext.cutsceneTrigger = 1;
+    EnSa_ChangeAnim(this, ENSA_ANIM1_4);
+    this->actionFunc = func_80AF68E4;
+}
+
+s32 EnSa_StartTeamGreeting(Actor* actor, PlayState* play) {
+    EnSa* this = (EnSa*)actor;
+
+    if (this->actionFunc != func_80AF6448 || this->interactInfo.talkState != NPC_TALK_STATE_IDLE) {
+        return false;
+    }
+    EnSa_StartGreeting(this, play);
+    return true;
+}
+
 void EnSa_Init(Actor* thisx, PlayState* play) {
     EnSa* this = (EnSa*)thisx;
     s32 pad;
@@ -505,12 +524,7 @@ void EnSa_Init(Actor* thisx, PlayState* play) {
             this->actionFunc = func_80AF6448;
             break;
         case 4:
-            this->unk_210 = 0;
-            this->actor.gravity = -1.0f;
-            play->csCtx.segment = SEGMENTED_TO_VIRTUAL(gSpot04Cs_10E20);
-            gSaveContext.cutsceneTrigger = 1;
-            EnSa_ChangeAnim(this, ENSA_ANIM1_4);
-            this->actionFunc = func_80AF68E4;
+            EnSa_StartGreeting(this, play);
             break;
         case 3:
             this->unk_210 = 0;

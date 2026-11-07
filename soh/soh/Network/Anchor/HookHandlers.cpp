@@ -112,10 +112,12 @@ void Anchor::RegisterHooks() {
 
     COND_HOOK(OnScriptedCutsceneStart, isConnected, [&]() { OnScriptedCutsceneStart(); });
     COND_VB_SHOULD(VB_ADVANCE_MESSAGE, isConnected, {
-        Anchor::Instance->HandleTeamCutsceneInput(va_arg(args, PlayState*), false, should);
+        Anchor::Instance->HandleTeamCutsceneInput(va_arg(args, PlayState*), should);
     });
     COND_VB_SHOULD(VB_SKIP_MESSAGE_TEXT, isConnected, {
-        Anchor::Instance->HandleTeamCutsceneInput(va_arg(args, PlayState*), true, should);
+        PlayState* play = va_arg(args, PlayState*);
+        bool* skipTextbox = va_arg(args, bool*);
+        Anchor::Instance->HandleTeamCutsceneInput(play, should, skipTextbox);
     });
     COND_HOOK(OnEnemyDamage, isConnected,
               [&](Actor* actor, int32_t damage, int32_t reaction) { SendPacket_EnemyDamage(actor, damage, reaction); });

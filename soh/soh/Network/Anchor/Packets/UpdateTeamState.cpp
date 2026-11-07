@@ -184,6 +184,8 @@ void Anchor::HandlePacket_UpdateTeamState(nlohmann::json payload) {
             gSaveContext.itemGetInf[i] |= loadedData.itemGetInf[i];
         }
 
+        // Saria's introduction is completed locally when each player finishes the scene.
+        loadedData.infTable[INFTABLE_GREETED_BY_SARIA >> 4] &= ~(1u << (INFTABLE_GREETED_BY_SARIA & 0xF));
         // Skip last row of infTable, don't want to sync swordless flag
         for (int i = 0; i < 29; i++) {
             gSaveContext.infTable[i] |= loadedData.infTable[i];

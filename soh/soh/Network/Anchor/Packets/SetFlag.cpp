@@ -15,7 +15,8 @@ extern PlayState* gPlayState;
  */
 
 void Anchor::SendPacket_SetFlag(s16 sceneNum, s16 flagType, s16 flag) {
-    if (!IsSaveLoaded() || !roomState.syncItemsAndFlags) {
+    if (!IsSaveLoaded() || !roomState.syncItemsAndFlags ||
+        (sceneNum == SCENE_ID_MAX && flagType == FLAG_INF_TABLE && flag == INFTABLE_GREETED_BY_SARIA)) {
         return;
     }
 
@@ -47,6 +48,9 @@ void Anchor::HandlePacket_SetFlag(nlohmann::json payload) {
     }
 
     if (sceneNum == SCENE_ID_MAX) {
+        if (flagType == FLAG_INF_TABLE && flag == INFTABLE_GREETED_BY_SARIA) {
+            return;
+        }
         auto effect = new GameInteractionEffect::SetFlag();
         effect->parameters[0] = flagType;
         effect->parameters[1] = flag;

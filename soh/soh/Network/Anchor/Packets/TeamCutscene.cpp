@@ -7,6 +7,7 @@
 #include "scenes/dungeons/ydan/ydan_scene.h"
 #include "scenes/misc/hakaana_ouke/hakaana_ouke_scene.h"
 #include "scenes/overworld/spot02/spot02_scene.h"
+#include "scenes/overworld/spot04/spot04_scene.h"
 #include <algorithm>
 #include <cstring>
 #include <string_view>
@@ -19,12 +20,13 @@ extern "C" {
 extern PlayState* gPlayState;
 extern CutsceneData D_808BCE20[];
 extern CutsceneData D_808BD2A0[];
+s32 EnSa_StartTeamGreeting(Actor* actor, PlayState* play);
 }
 
 namespace {
 enum CutsceneId {
     SARIA_BRIDGE, ZELDA_ESCAPE, DEKU_TREE_MEETING, DEKU_TREE_QUESTION, DEKU_TREE_ENTRANCE, GOHMA_EXIT_STORY,
-    GOHMA_EXIT_RETURN, ZELDA_MEETING, ROYAL_TOMB_OPENING, SUN_SONG_LESSON, ROOM_SCRIPTED, RESERVED_SARIA_GREETING,
+    GOHMA_EXIT_RETURN, ZELDA_MEETING, ROYAL_TOMB_OPENING, SUN_SONG_LESSON, ROOM_SCRIPTED, SARIA_GREETING,
     DODONGO_EXIT_STORY, DODONGO_EXIT_RETURN,
 };
 
@@ -51,7 +53,7 @@ constexpr TeamCutscene teamCutscenes[] = {
     { ENTR_GRAVEYARD_ENTRANCE, SCENE_GRAVEYARD, 0xFFFD, { EVENTCHKINF_DESTROYED_ROYAL_FAMILY_TOMB, -1 } },
     { ENTR_ROYAL_FAMILYS_TOMB_0, SCENE_ROYAL_FAMILYS_TOMB, 0xFFFD, { -1, -1 } },
     { -1, SCENE_ID_MAX, 0, { -1, -1 } }, // ROOM_SCRIPTED uses the sender's scene and script.
-    { -1, SCENE_ID_MAX, 0, { -1, -1 } }, // Reserved for the Saria greeting packet.
+    { ENTR_KOKIRI_FOREST_OUTSIDE_LINKS_HOUSE, SCENE_KOKIRI_FOREST, 0xFFFD, { -1, -1 } },
     { ENTR_DEATH_MOUNTAIN_TRAIL_BOTTOM_EXIT, SCENE_DEATH_MOUNTAIN_TRAIL, 0xFFF1,
       { EVENTCHKINF_USED_DODONGOS_CAVERN_BLUE_WARP, -1 } },
     { ENTR_DEATH_MOUNTAIN_TRAIL_DODONGO_BLUE_WARP, SCENE_DEATH_MOUNTAIN_TRAIL, 0, { -1, -1 } },
@@ -83,7 +85,16 @@ bool IsTombCutscene(int id) {
 }
 
 bool IsRoomCutscene(int id) {
-    return id == ZELDA_MEETING || id == SUN_SONG_LESSON || id == ROOM_SCRIPTED;
+    return id == ZELDA_MEETING || id == SUN_SONG_LESSON || id == ROOM_SCRIPTED || id == SARIA_GREETING;
+}
+
+bool IsSariaGreetingLocation(const PlayState* play, int room) {
+    return play->sceneNum == SCENE_LINKS_HOUSE ||
+           (play->sceneNum == SCENE_KOKIRI_FOREST && play->roomCtx.curRoom.num == room);
+}
+
+bool IsDialogueAdvanceMode(int mode) {
+    return mode == MSGMODE_TEXT_AWAIT_INPUT || mode == MSGMODE_TEXT_AWAIT_NEXT || mode == MSGMODE_TEXT_DONE;
 }
 
 bool IsSceneScript(std::string_view asset, int scene) {
@@ -126,6 +137,8 @@ bool IsCurrentCutscene(int id) {
     }
     const auto segment = gPlayState->csCtx.segment;
     switch (id) {
+        case SARIA_GREETING:
+            return IsAssetSegment(segment, gSpot04Cs_10E20);
         case DEKU_TREE_MEETING:
             return segment == D_808BCE20;
         case DEKU_TREE_QUESTION:
@@ -152,11 +165,11 @@ bool Anchor::CanShareTombCutscenes(bool requirePlayer) {
 }
 
 bool Anchor::CanUseTeamCutscene(int id) {
-    if (id == RESERVED_SARIA_GREETING) {
-        return false;
-    }
     if (IsBossWarp(id)) {
         return CanFollowBossWarp();
+    }
+    if (id == SARIA_GREETING && CVarGetInteger(CVAR_ENHANCEMENT("TimeSavers.SkipCutscene.Entrances"), 0)) {
+        return false;
     }
     return (IsTombCutscene(id) || id == ROOM_SCRIPTED) ? CanShareTombCutscenes() : CanShareCutscenes();
 }
@@ -173,6 +186,7 @@ bool Anchor::CanFollowBossWarp() {
 
 void Anchor::AnnounceTeamCutscene(int id) {
     teamCutsceneInputs.clear();
+    teamCutsceneStep = 0;
     teamCutsceneLeader = ownClientId;
     teamCutsceneStartedAt = std::chrono::duration_cast<std::chrono::microseconds>(
                                 std::chrono::system_clock::now().time_since_epoch())
@@ -324,6 +338,7 @@ void Anchor::ResetTeamCutscene() {
     teamCutsceneStartedAt = 0;
     teamCutsceneInputReady = {};
     teamCutsceneInputs.clear();
+    teamCutsceneStep = 0;
     lastCutsceneInput = {};
     bossWarpCommitted = false;
 }
@@ -349,8 +364,10 @@ void Anchor::OnScriptedCutsceneStart() {
         playedTeamCutscenes |= 1u << id;
         activeTeamCutscene = id;
         pendingTeamCutscene = -1;
-        if (id == SUN_SONG_LESSON) {
+        if (id == SUN_SONG_LESSON || id == SARIA_GREETING) {
             teamCutsceneRoom = gPlayState->roomCtx.curRoom.num;
+        }
+        if (id == SUN_SONG_LESSON) {
             teamCutsceneDeadline = std::chrono::steady_clock::now() + std::chrono::seconds(90);
         }
         lastCutsceneInput = {};
@@ -405,9 +422,11 @@ void Anchor::HandlePacket_TeamCutscene(nlohmann::json payload) {
         return;
     }
     std::string asset;
+    const int room = IsRoomCutscene(id) ? payload.value("room", -1) : -1;
     if (IsRoomCutscene(id)) {
         const int scene = id == ROOM_SCRIPTED ? payload.value("scene", -1) : teamCutscenes[id].scene;
-        if (gPlayState->sceneNum != scene || payload.value("room", -1) != gPlayState->roomCtx.curRoom.num) {
+        if (id == SARIA_GREETING ? (room < 0 || !IsSariaGreetingLocation(gPlayState, room))
+                                 : (gPlayState->sceneNum != scene || room != gPlayState->roomCtx.curRoom.num)) {
             return;
         }
         if (id == ROOM_SCRIPTED) {
@@ -449,7 +468,7 @@ void Anchor::HandlePacket_TeamCutscene(nlohmann::json payload) {
 
     pendingTeamCutscene = id;
     if (IsRoomCutscene(id)) {
-        teamCutsceneRoom = gPlayState->roomCtx.curRoom.num;
+        teamCutsceneRoom = room;
     }
     if (id == ROOM_SCRIPTED) {
         teamScriptScene = gPlayState->sceneNum;
@@ -472,18 +491,20 @@ void Anchor::HandlePacket_TeamCutsceneInput(const nlohmann::json& payload) {
         return;
     }
     const int choice = payload.at("choice").get<int>();
-    if (choice >= 0 && choice < 3) {
+    const int step = payload.value("step", -1);
+    if (choice >= 0 && choice < 3 && step >= -1 && step <= 4096) {
         teamCutsceneInputs.push_back({ payload.at("text").get<int>(), payload.at("mode").get<int>(), choice,
-                                       payload.at("skip").get<bool>() });
+                                       payload.at("skip").get<bool>(), step });
     }
 }
 
-void Anchor::HandleTeamCutsceneInput(PlayState* play, bool skip, bool* should) {
+void Anchor::HandleTeamCutsceneInput(PlayState* play, bool* should, bool* skipTextbox) {
     if (activeTeamCutscene < 0 || play != gPlayState ||
         (play->csCtx.state == CS_STATE_IDLE && activeTeamCutscene != ZELDA_MEETING)) {
         return;
     }
 
+    const bool skip = skipTextbox != nullptr;
     auto& message = play->msgCtx;
     const auto stamp = std::make_tuple(play->gameplayFrames, static_cast<int>(message.textId),
                                        static_cast<int>(message.msgMode), skip);
@@ -501,9 +522,13 @@ void Anchor::HandleTeamCutsceneInput(PlayState* play, bool skip, bool* should) {
             payload["startedAt"] = teamCutsceneStartedAt;
             payload["text"] = message.textId;
             payload["mode"] = message.msgMode;
-            payload["choice"] = message.choiceIndex;
+            payload["choice"] = std::clamp<int>(message.choiceIndex, 0, 2);
             payload["skip"] = skip;
+            payload["step"] = teamCutsceneStep;
             SendJsonToRemote(payload);
+            if (!skip) {
+                ++teamCutsceneStep;
+            }
         }
         return;
     }
@@ -512,27 +537,33 @@ void Anchor::HandleTeamCutsceneInput(PlayState* play, bool skip, bool* should) {
     if (lastCutsceneInput == stamp) {
         return;
     }
-    const auto input = std::find_if(teamCutsceneInputs.begin(), teamCutsceneInputs.end(),
-                                    [&](const auto& event) { return event.text == message.textId; });
-    if (input != teamCutsceneInputs.end()) {
-        // The leader may advance while this client is still drawing the current page.
-        // Finish displaying it, then apply the queued advance through the normal message state.
-        if (skip && !input->skip) {
-            *should = true;
-            return;
-        }
-        if (!skip && input->skip) {
+    const auto matchesPage = [&](const TeamCutsceneInput& event) {
+        return event.text == message.textId && (event.step < 0 || event.step == teamCutsceneStep);
+    };
+    std::erase_if(teamCutsceneInputs, [&](const TeamCutsceneInput& event) {
+        return (event.step >= 0 && event.step < teamCutsceneStep) || (!skip && event.skip && matchesPage(event));
+    });
+    const auto input = std::find_if(teamCutsceneInputs.begin(), teamCutsceneInputs.end(), matchesPage);
+    if (input == teamCutsceneInputs.end()) {
+        return;
+    }
+    if (skip) {
+        // A real B skip affects every page in this textbox, even if the viewer is already waiting at a break.
+        if (input->skip) {
+            *skipTextbox = true;
             teamCutsceneInputs.erase(input);
-            return;
+            *should = true;
+        } else if (message.msgMode == MSGMODE_TEXT_DISPLAYING && input->mode != MSGMODE_TEXT_AWAIT_INPUT) {
+            // Reveal the current page without bypassing the wait that will consume the queued advance.
+            *skipTextbox = false;
+            *should = true;
         }
-        if (input->mode != message.msgMode || input->skip != skip) {
-            return;
-        }
-        if (!skip) {
-            message.choiceIndex = input->choice;
-        }
+    } else if (input->mode == message.msgMode ||
+               (IsDialogueAdvanceMode(input->mode) && IsDialogueAdvanceMode(message.msgMode))) {
+        message.choiceIndex = input->choice;
         lastCutsceneInput = stamp;
         teamCutsceneInputs.erase(input);
+        ++teamCutsceneStep;
         *should = true;
     }
 }
@@ -560,6 +591,7 @@ void Anchor::FollowPendingTeamCutscene() {
     if (!CanUseTeamCutscene(pendingTeamCutscene) ||
         (teamCutsceneLeader != ownClientId && !IsSharedTeamMember(teamCutsceneLeader)) ||
         (pendingTeamCutscene == ROOM_SCRIPTED && !IsInTeamScriptRoom()) ||
+        (pendingTeamCutscene == SARIA_GREETING && !IsSariaGreetingLocation(gPlayState, teamCutsceneRoom)) ||
         std::chrono::steady_clock::now() >= teamCutsceneDeadline) {
         ResetTeamCutscene();
         return;
@@ -601,6 +633,13 @@ void Anchor::FollowPendingTeamCutscene() {
         return;
     }
     const auto& cutscene = teamCutscenes[id];
+    if (id == SARIA_GREETING && gPlayState->sceneNum == SCENE_KOKIRI_FOREST) {
+        if (Actor* saria = Actor_Find(&gPlayState->actorCtx, ACTOR_EN_SA, ACTORCAT_NPC);
+            saria != nullptr && saria->init == nullptr && saria->update != nullptr) {
+            EnSa_StartTeamGreeting(saria, gPlayState);
+        }
+        return;
+    }
     if (id == ZELDA_MEETING) {
         if (gPlayState->sceneNum != SCENE_CASTLE_COURTYARD_ZELDA || gPlayState->roomCtx.curRoom.num != teamCutsceneRoom) {
             ResetTeamCutscene();

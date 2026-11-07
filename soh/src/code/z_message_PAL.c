@@ -4439,6 +4439,7 @@ void Message_Update(PlayState* play) {
                         ? CHECK_BTN_ALL(input->cur.button, BTN_B) && !sTextboxSkipped
                         : CHECK_BTN_ALL(input->press.button, BTN_B);
 
+    bool skipTextbox = true;
     switch (msgCtx->msgMode) {
         case MSGMODE_TEXT_START:
             sMessageStartFrameCount++;
@@ -4560,15 +4561,26 @@ void Message_Update(PlayState* play) {
             break;
         case MSGMODE_TEXT_DISPLAYING:
             if (msgCtx->textBoxType != TEXTBOX_TYPE_NONE_BOTTOM && YREG(31) == 0 &&
-                GameInteractor_Should(VB_SKIP_MESSAGE_TEXT, isB_Held && !msgCtx->textUnskippable, play)) {
-                sTextboxSkipped = true;
-                msgCtx->textDrawPos = msgCtx->decodedTextLen;
+                GameInteractor_Should(VB_SKIP_MESSAGE_TEXT, isB_Held && !msgCtx->textUnskippable, play, &skipTextbox)) {
+                if (skipTextbox) {
+                    sTextboxSkipped = true;
+                    msgCtx->textDrawPos = msgCtx->decodedTextLen;
+                } else {
+                    // The end-of-page control code is at decodedTextLen and the draw loop excludes textDrawPos.
+                    msgCtx->textDrawPos = msgCtx->decodedTextLen + 1;
+                }
             }
             break;
         case MSGMODE_TEXT_AWAIT_INPUT:
-            if (YREG(31) == 0 && Message_ShouldAdvance(play)) {
-                msgCtx->msgMode = MSGMODE_TEXT_DISPLAYING;
-                msgCtx->textDrawPos++;
+            if (YREG(31) == 0) {
+                if (GameInteractor_Should(VB_SKIP_MESSAGE_TEXT, false, play, &skipTextbox) && skipTextbox) {
+                    sTextboxSkipped = true;
+                    msgCtx->msgMode = MSGMODE_TEXT_DISPLAYING;
+                    msgCtx->textDrawPos = msgCtx->decodedTextLen;
+                } else if (Message_ShouldAdvance(play)) {
+                    msgCtx->msgMode = MSGMODE_TEXT_DISPLAYING;
+                    msgCtx->textDrawPos++;
+                }
             }
             break;
         case MSGMODE_TEXT_DELAYED_BREAK:
@@ -4577,13 +4589,18 @@ void Message_Update(PlayState* play) {
                 msgCtx->msgMode = MSGMODE_TEXT_NEXT_MSG;
             }
             break;
-        case MSGMODE_TEXT_AWAIT_NEXT:
-            if (Message_ShouldAdvance(play)) {
+        case MSGMODE_TEXT_AWAIT_NEXT: {
+            bool skipPage = GameInteractor_Should(VB_SKIP_MESSAGE_TEXT, false, play, &skipTextbox) && skipTextbox;
+            if (skipPage) {
+                sTextboxSkipped = true;
+            }
+            if (skipPage || Message_ShouldAdvance(play)) {
                 msgCtx->msgMode = MSGMODE_TEXT_NEXT_MSG;
                 msgCtx->textUnskippable = false;
                 msgCtx->msgBufPos++;
             }
             break;
+        }
         case MSGMODE_TEXT_DONE:
             if (msgCtx->textboxEndType == TEXTBOX_ENDTYPE_FADING) {
                 msgCtx->stateTimer--;
