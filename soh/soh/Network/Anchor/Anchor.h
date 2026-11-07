@@ -172,6 +172,7 @@ class Anchor : public Network {
         Vec3s head;
         Vec3s torso;
     };
+    using WorldClockVersion = std::pair<uint32_t, uint32_t>;
     struct WorldPeer {
         int scene = SCENE_ID_MAX;
         int room = -1;
@@ -181,6 +182,7 @@ class Anchor : public Network {
         bool hasClock = false;
         u16 dayTime = 0;
         u16 skyboxTime = 0;
+        WorldClockVersion clockVersion{};
         uint32_t visit = 0;
         std::chrono::steady_clock::time_point entered;
         std::chrono::steady_clock::time_point updated;
@@ -200,6 +202,7 @@ class Anchor : public Network {
     WorldPeer localWorldPeer;
     uint32_t worldVisit = 0;
     std::map<uint32_t, WorldPeer> worldPeers;
+    std::map<int, WorldClockVersion> worldClockVersions;
     std::chrono::steady_clock::time_point nextWorldUpdate;
     uint32_t npcAuthority = 0;
     uint32_t enemyPoseAuthority = 0;
@@ -288,8 +291,9 @@ class Anchor : public Network {
     void AddNpcGazeSnapshot(nlohmann::json& payload);
     void ReadNpcGazeSnapshot(const nlohmann::json& payload, WorldPeer& peer);
     void UpdateWorldState();
-    void ApplyTeamFieldTime();
-    const WorldPeer* FindFieldClockPeer(bool entering) const;
+    void ApplyTeamWorldTime();
+    WorldClockVersion GetWorldClockVersion(int scene) const;
+    const WorldPeer* FindWorldClockPeer(int scene, bool entering) const;
     void ResetWorldState();
     bool CanShareRoomObjects();
     NpcArea GetRoomObjectArea();
@@ -418,6 +422,7 @@ class Anchor : public Network {
     void HandlePacket_RoomObject(const nlohmann::json& payload);
     bool ShouldUpdateSharedScrub(Actor* actor);
     void ApplyWorldTimeOnEntry(PlayState* play);
+    void RecordSunSongTime(PlayState* play);
     int ApplyGuardPose(Actor* actor, s16* headAngle);
     void ApplyDampePose(Actor* actor);
     bool ShouldSpawnStalchildren();

@@ -14,6 +14,7 @@ extern "C" {
 #include "overlays/actors/ovl_En_Hs2/z_en_hs2.h"
 #include "overlays/actors/ovl_En_Hy/z_en_hy.h"
 extern PlayState* gPlayState;
+s32 Interface_ReloadForSunSong(PlayState* play, u16 nextDayTime);
 }
 
 namespace {
@@ -24,6 +25,7 @@ constexpr auto peerTimeout = 2s;
 constexpr auto arrivalTieWindow = 500ms;
 constexpr int maxAreaAgeMs = 24 * 60 * 60 * 1000;
 constexpr int maxNpcPositions = 48;
+constexpr uint32_t maxClockSequence = 1'000'000'000;
 
 bool SyncNpcPositionsEnabled() {
     return CVarGetInteger(CVAR_REMOTE_ANCHOR("SyncNpcPositions"), 0) != 0;
@@ -39,6 +41,14 @@ bool IsGuardCourtyard(int scene) {
 
 bool IsClockScene(int scene) {
     return scene == SCENE_HYRULE_FIELD || scene == SCENE_GRAVEYARD || scene == SCENE_KAKARIKO_VILLAGE;
+}
+
+bool IsNightTime(u16 time) {
+    return time < 0x4555 || time > 0xC000;
+}
+
+bool HasSunSongDestination() {
+    return gSaveContext.nextDayTime == 0 || gSaveContext.nextDayTime == 0x8001;
 }
 
 bool IsVillageGazeNpc(s16 id) {
@@ -131,27 +141,41 @@ uint32_t Anchor::ChooseNpcAuthority(const NpcArea& area) const {
     return authority;
 }
 
-const Anchor::WorldPeer* Anchor::FindFieldClockPeer(bool entering) const {
+Anchor::WorldClockVersion Anchor::GetWorldClockVersion(int scene) const {
+    const auto version = worldClockVersions.find(scene);
+    return version == worldClockVersions.end() ? WorldClockVersion{} : version->second;
+}
+
+const Anchor::WorldPeer* Anchor::FindWorldClockPeer(int scene, bool entering) const {
     const auto now = Clock::now();
+    const auto localVersion = GetWorldClockVersion(scene);
+    const bool field = scene == SCENE_HYRULE_FIELD;
     const auto eligible = [&](uint32_t id, const WorldPeer& peer) {
-        return peer.scene == SCENE_HYRULE_FIELD && peer.hasClock && now - peer.updated < peerTimeout &&
-               IsSharedTeamMember(id);
+        return peer.scene == scene && (field || peer.age == gSaveContext.linkAge) && peer.hasClock &&
+               peer.clockVersion >= localVersion && now - peer.updated < peerTimeout && IsSharedTeamMember(id);
     };
-    const bool local = !entering && localWorldPeer.scene == SCENE_HYRULE_FIELD;
+    const bool local = !entering && localWorldPeer.scene == scene;
+    auto version = localVersion;
     auto first = local ? localWorldPeer.entered : Clock::time_point::max();
     for (const auto& [id, peer] : worldPeers) {
-        if (eligible(id, peer)) {
+        if (!eligible(id, peer)) {
+            continue;
+        }
+        if (peer.clockVersion > version) {
+            version = peer.clockVersion;
+            first = peer.entered;
+        } else if (peer.clockVersion == version) {
             first = std::min(first, peer.entered);
         }
     }
     if (first == Clock::time_point::max()) {
         return nullptr;
     }
-    const auto tie = first + arrivalTieWindow;
-    uint32_t authority = local && localWorldPeer.entered <= tie ? ownClientId : 0;
+    const auto tie = first + (field ? arrivalTieWindow : 0ms);
+    uint32_t authority = local && localVersion == version && localWorldPeer.entered <= tie ? ownClientId : 0;
     const WorldPeer* clock = nullptr;
     for (const auto& [id, peer] : worldPeers) {
-        if (eligible(id, peer) && peer.entered <= tie &&
+        if (eligible(id, peer) && peer.clockVersion == version && peer.entered <= tie &&
             (authority == 0 || id == roomState.ownerClientId || (authority != roomState.ownerClientId && id < authority))) {
             authority = id;
             clock = &peer;
@@ -160,44 +184,87 @@ const Anchor::WorldPeer* Anchor::FindFieldClockPeer(bool entering) const {
     return clock;
 }
 
-void Anchor::ApplyTeamFieldTime() {
-    if (roomState.syncItemsAndFlags && SyncFieldTimeEnabled() && IsSaveLoaded()) {
-        const auto* clock = FindFieldClockPeer(false);
-        if (clock == nullptr) {
+void Anchor::ApplyTeamWorldTime() {
+    if (!SyncFieldTimeEnabled() || IS_CUTSCENE_LAYER || Play_InCsMode(gPlayState) ||
+        gSaveContext.sunsSongState != SUNSSONG_INACTIVE || gPlayState->transitionTrigger != TRANS_TRIGGER_OFF ||
+        gPlayState->transitionMode != TRANS_MODE_OFF || gSaveContext.health <= 0) {
+        return;
+    }
+
+    const int scene = gPlayState->sceneNum;
+    const auto* clock = FindWorldClockPeer(scene, false);
+    if (clock == nullptr) {
+        return;
+    }
+    const bool songChangedTime = clock->clockVersion > GetWorldClockVersion(scene);
+    if (!songChangedTime && scene != SCENE_HYRULE_FIELD) {
+        return;
+    }
+    if (songChangedTime && gPlayState->envCtx.timeIncrement == 0 &&
+        IsNightTime(clock->dayTime) != IsNightTime(gSaveContext.dayTime)) {
+        if (gPlayState->pauseCtx.state != 0 || gPlayState->pauseCtx.debugState != 0 ||
+            gPlayState->msgCtx.msgLength != 0 ||
+            !Interface_ReloadForSunSong(gPlayState, IsNightTime(clock->dayTime) ? 0 : 0x8001)) {
             return;
         }
+    } else {
         gSaveContext.dayTime = clock->dayTime;
         gSaveContext.skyboxTime = clock->skyboxTime;
-        gSaveContext.nightFlag = gSaveContext.dayTime > 0xC000 || gSaveContext.dayTime < 0x4555;
+        gSaveContext.nightFlag = IsNightTime(clock->dayTime);
+    }
+    if (songChangedTime) {
+        worldClockVersions[scene] = clock->clockVersion;
+        nextWorldUpdate = {};
+    }
+}
+
+void Anchor::RecordSunSongTime(PlayState* play) {
+    if (play != gPlayState || !CanShareRoomObjects() || !SyncFieldTimeEnabled() ||
+        IS_CUTSCENE_LAYER || play->csCtx.state != CS_STATE_IDLE) {
+        return;
+    }
+    const int scene = play->sceneNum;
+    uint32_t sequence = GetWorldClockVersion(scene).first;
+    for (const auto& [id, peer] : worldPeers) {
+        if (peer.scene == scene && IsSharedTeamMember(id)) {
+            sequence = std::max(sequence, peer.clockVersion.first);
+        }
+    }
+    if (sequence < maxClockSequence) {
+        worldClockVersions[scene] = { sequence + 1, ownClientId };
+        nextWorldUpdate = {};
+        if (HasSunSongDestination()) {
+            // Fixed-time areas can load a different scene after the fade.
+            UpdateWorldState();
+        }
+    }
+}
+
+extern "C" void Anchor_RecordSunSongTime(PlayState* play) {
+    if (Anchor::Instance != nullptr) {
+        Anchor::Instance->RecordSunSongTime(play);
     }
 }
 
 void Anchor::ApplyWorldTimeOnEntry(PlayState* play) {
     if (!isConnected || !roomState.syncItemsAndFlags || !IsSaveLoaded(false) || gPlayState != play ||
-        gSaveContext.entranceIndex < 0 || gSaveContext.entranceIndex >= ENTR_MAX || gSaveContext.cutsceneIndex >= 0xFFF0) {
+        gSaveContext.entranceIndex < 0 || gSaveContext.entranceIndex >= ENTR_MAX || gSaveContext.cutsceneIndex >= 0xFFF0 ||
+        HasSunSongDestination()) {
         return;
     }
     const auto scene = gEntranceTable[gSaveContext.entranceIndex].scene;
-    if (scene == SCENE_HYRULE_FIELD && SyncFieldTimeEnabled()) {
-        if (const auto* clock = FindFieldClockPeer(true)) {
+    if (SyncFieldTimeEnabled()) {
+        if (const auto* clock = FindWorldClockPeer(scene, true);
+            clock != nullptr && (IsClockScene(scene) || clock->clockVersion.first != 0)) {
             gSaveContext.dayTime = clock->dayTime;
             gSaveContext.skyboxTime = clock->skyboxTime;
-        }
-    } else if ((scene == SCENE_GRAVEYARD || scene == SCENE_KAKARIKO_VILLAGE) && SyncFieldTimeEnabled()) {
-        const WorldPeer* first = nullptr;
-        const auto now = Clock::now();
-        for (const auto& [id, peer] : worldPeers) {
-            if (peer.scene == scene && peer.hasClock && peer.age == gSaveContext.linkAge &&
-                now - peer.updated < peerTimeout && IsSharedTeamMember(id) &&
-                (first == nullptr || peer.entered < first->entered)) {
-                first = &peer;
+            if (clock->clockVersion.first != 0) {
+                worldClockVersions[scene] = clock->clockVersion;
             }
+            return;
         }
-        if (first != nullptr) {
-            gSaveContext.dayTime = first->dayTime;
-            gSaveContext.skyboxTime = first->skyboxTime;
-        }
-    } else if (IsGuardCourtyard(scene)) {
+    }
+    if (IsGuardCourtyard(scene)) {
         const WorldPeer* first = nullptr;
         const auto now = Clock::now();
         for (const auto& [id, peer] : worldPeers) {
@@ -224,6 +291,7 @@ void Anchor::ResetWorldState() {
     ResetCombatRoom();
     localWorldPeer = {};
     worldPeers.clear();
+    worldClockVersions.clear();
     nextWorldUpdate = {};
     npcAuthority = 0;
     enemyPoseAuthority = 0;
@@ -502,8 +570,13 @@ void Anchor::UpdateWorldState() {
         }
         payload["npcs"] = std::move(positions);
     }
-    if (syncClock && IsClockScene(scene) && !inCutscene) {
-        payload["clock"] = { gSaveContext.dayTime, gSaveContext.skyboxTime };
+    const auto clockVersion = GetWorldClockVersion(scene);
+    const bool songReload = clockVersion.first != 0 && HasSunSongDestination();
+    if (syncClock && (IsClockScene(scene) || clockVersion.first != 0) &&
+        (songReload || (!inCutscene && gSaveContext.sunsSongState != SUNSSONG_SPEED_TIME))) {
+        const u16 time = songReload ? gSaveContext.nextDayTime : gSaveContext.dayTime;
+        const u16 sky = songReload ? time : gSaveContext.skyboxTime;
+        payload["clock"] = { time, sky, clockVersion };
     }
     if (syncCombat) {
         AddEnemyDamageSnapshot(payload);
@@ -590,15 +663,19 @@ void Anchor::HandlePacket_WorldState(const nlohmann::json& payload) {
             }
         }
     }
-    if (IsClockScene(peer.scene) && payload.contains("clock")) {
+    if (SyncFieldTimeEnabled() && payload.contains("clock")) {
         const auto& clock = payload.at("clock");
-        peer.hasClock = true;
+        const auto version = clock.size() > 2 ? clock.at(2).get<WorldClockVersion>() : WorldClockVersion{};
+        const bool validSong = version.first > 0 && version.first <= maxClockSequence && version.second != 0;
+        peer.hasClock = validSong || (version == WorldClockVersion{} && IsClockScene(peer.scene));
         peer.dayTime = clock.at(0).get<u16>();
         peer.skyboxTime = clock.at(1).get<u16>();
+        peer.clockVersion = validSong ? version : WorldClockVersion{};
     }
+    const bool sameSceneClock = peer.hasClock && peer.scene == gPlayState->sceneNum;
     worldPeers[id] = std::move(peer);
 
-    if (gPlayState->sceneNum == SCENE_HYRULE_FIELD && !IS_CUTSCENE_LAYER && !Play_InCsMode(gPlayState)) {
-        ApplyTeamFieldTime();
+    if (sameSceneClock) {
+        ApplyTeamWorldTime();
     }
 }

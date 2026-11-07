@@ -157,7 +157,8 @@ void AnchorMainMenu(WidgetInfo& info) {
                                 "Follow the first teammate to enter the area. The room owner wins ties."));
     UIWidgets::CVarCheckbox("Sync Hyrule Field Time", CVAR_REMOTE_ANCHOR("SyncHyruleFieldTime"),
                             UIWidgets::CheckboxOptions().Color(THEME_COLOR).Tooltip(
-                                "Use the room owner's clock in Hyrule Field when both players enable this."));
+                                "Share the clock in Hyrule Field and Sun's Song time changes with teammates "
+                                "in the same area when both players enable this."));
 
     bool hideLocations = Anchor::Instance->roomState.showLocationsMode == 0;
     ImGui::BeginDisabled(hideLocations);

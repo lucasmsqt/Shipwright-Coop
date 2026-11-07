@@ -6494,6 +6494,37 @@ void Interface_DrawTotalGameplayTimer(PlayState* play) {
     }
 }
 
+void Anchor_RecordSunSongTime(PlayState* play);
+
+s32 Interface_ReloadForSunSong(PlayState* play, u16 nextDayTime) {
+    if (play->roomCtx.curRoom.behaviorType1 == ROOM_BEHAVIOR_TYPE1_1 ||
+        play->interfaceCtx.restrictions.sunsSong == 3) {
+        return false;
+    }
+
+    gSaveContext.nextDayTime = nextDayTime;
+    play->transitionType = nextDayTime == 0 ? TRANS_TYPE_FADE_BLACK_FAST : TRANS_TYPE_FADE_WHITE_FAST;
+    gSaveContext.nextTransitionType = nextDayTime == 0 ? TRANS_TYPE_FADE_BLACK : TRANS_TYPE_FADE_WHITE;
+    play->haltAllActors = 1;
+    if (play->sceneNum == SCENE_HAUNTED_WASTELAND) {
+        play->transitionType = TRANS_TYPE_SANDSTORM_PERSIST;
+        gSaveContext.nextTransitionType = TRANS_TYPE_SANDSTORM_PERSIST;
+    }
+
+    gSaveContext.respawnFlag = -2;
+    play->nextEntranceIndex = gSaveContext.entranceIndex;
+    if (IS_RANDO && Randomizer_GetSettingValue(RSK_SHUFFLE_ENTRANCES)) {
+        Grotto_ForceGrottoReturn();
+    }
+
+    play->transitionTrigger = TRANS_TRIGGER_START;
+    gSaveContext.sunsSongState = SUNSSONG_INACTIVE;
+    func_800F6964(30);
+    gSaveContext.seqId = (u8)NA_BGM_DISABLED;
+    gSaveContext.natureAmbienceId = NATURE_ID_DISABLED;
+    return true;
+}
+
 void Interface_Update(PlayState* play) {
     static u8 D_80125B60 = 0;
     static s16 sPrevTimeSpeed = 0;
@@ -6875,46 +6906,21 @@ void Interface_Update(PlayState* play) {
                     gSaveContext.sunsSongState = SUNSSONG_INACTIVE;
                     gTimeSpeed = sPrevTimeSpeed;
                     play->msgCtx.ocarinaMode = OCARINA_MODE_04;
+                    Anchor_RecordSunSongTime(play);
                 }
             } else if (gSaveContext.dayTime > 0xC001) {
                 gSaveContext.sunsSongState = SUNSSONG_INACTIVE;
                 gTimeSpeed = sPrevTimeSpeed;
                 play->msgCtx.ocarinaMode = OCARINA_MODE_04;
+                Anchor_RecordSunSongTime(play);
             }
-        } else if ((play->roomCtx.curRoom.behaviorType1 != ROOM_BEHAVIOR_TYPE1_1) &&
-                   (interfaceCtx->restrictions.sunsSong != 3)) {
-            if ((gSaveContext.dayTime >= 0x4555) && (gSaveContext.dayTime < 0xC001)) {
-                gSaveContext.nextDayTime = 0;
-                play->transitionType = TRANS_TYPE_FADE_BLACK_FAST;
-                gSaveContext.nextTransitionType = TRANS_TYPE_FADE_BLACK;
-                play->haltAllActors = 1;
-            } else {
-                gSaveContext.nextDayTime = 0x8001;
-                play->transitionType = TRANS_TYPE_FADE_WHITE_FAST;
-                gSaveContext.nextTransitionType = TRANS_TYPE_FADE_WHITE;
-                play->haltAllActors = 1;
-            }
-
-            if (play->sceneNum == SCENE_HAUNTED_WASTELAND) {
-                play->transitionType = TRANS_TYPE_SANDSTORM_PERSIST;
-                gSaveContext.nextTransitionType = TRANS_TYPE_SANDSTORM_PERSIST;
-            }
-
-            gSaveContext.respawnFlag = -2;
-            play->nextEntranceIndex = gSaveContext.entranceIndex;
-
-            // In ER, handle sun song respawn from last entrance from grottos
-            if (IS_RANDO && Randomizer_GetSettingValue(RSK_SHUFFLE_ENTRANCES)) {
-                Grotto_ForceGrottoReturn();
-            }
-
-            play->transitionTrigger = TRANS_TRIGGER_START;
-            gSaveContext.sunsSongState = SUNSSONG_INACTIVE;
-            func_800F6964(30);
-            gSaveContext.seqId = (u8)NA_BGM_DISABLED;
-            gSaveContext.natureAmbienceId = NATURE_ID_DISABLED;
         } else {
-            gSaveContext.sunsSongState = SUNSSONG_SPECIAL;
+            const u16 nextDayTime = gSaveContext.dayTime >= 0x4555 && gSaveContext.dayTime < 0xC001 ? 0 : 0x8001;
+            if (Interface_ReloadForSunSong(play, nextDayTime)) {
+                Anchor_RecordSunSongTime(play);
+            } else {
+                gSaveContext.sunsSongState = SUNSSONG_SPECIAL;
+            }
         }
     }
 }
